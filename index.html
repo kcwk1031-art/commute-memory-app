@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>通勤路線記憶</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="floating-recorder" id="floatingRecorder" aria-live="polite">
+    <span class="recording-light"></span>
+    <strong>未紀錄</strong>
+    <small>GPS 待命</small>
+  </div>
+  <main class="app-shell">
+    <section class="top-band">
+      <div>
+        <p class="eyebrow">楊梅 -> 新店</p>
+        <h1>通勤路線記憶</h1>
+        <p class="summary">自動記錄 GPS 軌跡、速度與停滯路段；車道以影像推估為輔，低信心時改由手動標記避免誤判。</p>
+      </div>
+      <div class="status-tile" id="recordStatus">
+        <span class="status-dot"></span>
+        <strong>尚未紀錄</strong>
+        <small>等待啟動定位</small>
+      </div>
+    </section>
+
+    <section class="mode-switch" aria-label="畫面模式">
+      <button class="is-active" id="modeRecord" type="button">紀錄模式</button>
+      <button id="modeGuidance" type="button">即時建議</button>
+      <button id="modeDashboard" type="button">分析看板</button>
+    </section>
+
+    <section class="restore-banner is-hidden" id="restoreBanner" aria-live="polite">
+      <div>
+        <strong>偵測到未結束行程</strong>
+        <span id="restoreText">可恢復上一趟紀錄，避免資料遺失。</span>
+      </div>
+      <div class="restore-actions">
+        <button class="primary" id="restoreTrip" type="button">恢復紀錄</button>
+        <button class="text-button" id="discardDraft" type="button">忽略</button>
+      </div>
+    </section>
+
+    <section class="control-band record-view" aria-label="主要控制">
+      <button class="secondary" id="autoMode" type="button">啟動自動模式</button>
+      <button class="primary main-action" id="startTrip" type="button">立即開始紀錄</button>
+      <button class="primary main-action stop-action" id="stopTrip" type="button" disabled>結束並保存</button>
+      <button class="secondary minor-action" id="cameraToggle" type="button">相機車道偵測</button>
+    </section>
+
+    <section class="metrics-grid record-view" aria-label="本次通勤數據">
+      <article class="metric">
+        <span>本次時間</span>
+        <strong id="elapsed">00:00</strong>
+      </article>
+      <article class="metric">
+        <span>目前速度</span>
+        <strong id="speed">-- km/h</strong>
+      </article>
+      <article class="metric">
+        <span>行駛距離</span>
+        <strong id="distance">0.0 km</strong>
+      </article>
+      <article class="metric">
+        <span>資料點</span>
+        <strong id="pointCount">0</strong>
+      </article>
+    </section>
+
+    <section class="work-area record-view">
+      <div class="panel lane-panel">
+        <div class="panel-head">
+          <div>
+            <h2>車道影像推估</h2>
+            <p>可切換鏡頭與縮放；影像信心不足時，以手動車道標記為主。</p>
+          </div>
+          <span class="confidence" id="laneConfidence">信心度 --</span>
+        </div>
+
+        <div class="camera-controls">
+          <label>
+            鏡頭
+            <select id="cameraSelect">
+              <option value="">自動後鏡頭</option>
+            </select>
+          </label>
+          <label class="zoom-control" id="zoomControl">
+            縮放
+            <input id="zoomSlider" type="range" min="1" max="4" step="0.1" value="1">
+          </label>
+        </div>
+
+        <div class="manual-panel">
+          <div>
+            <span class="control-label">道路車道數</span>
+            <div class="segmented" id="laneCountButtons" aria-label="道路車道數"></div>
+          </div>
+          <div>
+            <span class="control-label">目前車道</span>
+            <div class="segmented lane-buttons" id="manualLaneButtons" aria-label="手動目前車道"></div>
+          </div>
+          <div>
+            <span class="control-label">旁邊車流</span>
+            <div class="segmented flow-buttons" id="flowButtons" aria-label="旁邊車流快慢">
+              <button type="button" data-flow="left_faster">左線較快</button>
+              <button type="button" data-flow="same">差不多</button>
+              <button type="button" data-flow="right_faster">右線較快</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="camera-stage">
+          <video id="cameraFeed" playsinline muted></video>
+          <canvas id="laneCanvas"></canvas>
+          <div class="recording-overlay" id="recordingOverlay">尚未紀錄</div>
+          <div class="camera-empty" id="cameraEmpty">
+            <strong>相機尚未啟動</strong>
+            <span>啟動後會在本機即時分析畫面，不上傳也不保存影像。</span>
+          </div>
+        </div>
+        <div class="lane-readout">
+          <span>目前推估</span>
+          <strong id="laneResult">尚無資料</strong>
+          <small id="laneReason">車道結果會與 GPS 時間點一併保存。</small>
+        </div>
+      </div>
+
+      <div class="panel route-panel">
+        <div class="panel-head">
+          <div>
+            <h2>路線軌跡</h2>
+            <p>以定位點繪製本次行進方向與停滯區間。</p>
+          </div>
+          <button class="text-button" id="clearHistory" type="button">清除紀錄</button>
+        </div>
+        <canvas id="routeCanvas" class="route-canvas" width="760" height="420"></canvas>
+        <div class="route-note" id="routeNote">尚無 GPS 資料。</div>
+      </div>
+    </section>
+
+    <section class="dashboard-view is-hidden" id="dashboardView" aria-label="通勤分析看板">
+      <div class="dashboard-hero">
+        <div>
+          <p class="eyebrow">資料分析</p>
+          <h2>歷史車道趨勢</h2>
+          <p>依照已保存的 GPS 明細、車道紀錄與方向分類，顯示目前可參考的通勤趨勢。</p>
+        </div>
+        <strong id="dashboardVerdict">資料讀取中</strong>
+      </div>
+
+      <div class="dashboard-grid" id="dashboardSummary"></div>
+      <div class="direction-grid" id="dashboardDirections"></div>
+    </section>
+
+    <section class="guidance-view is-hidden" id="guidanceView" aria-label="開車即時建議">
+      <div class="guidance-hero">
+        <div>
+          <p class="eyebrow">開車即時</p>
+          <h2 id="guidanceTitle">準備啟動定位</h2>
+          <p id="guidanceSubtitle">依目前 GPS 位置與過去同方向紀錄，提供保守車道建議。</p>
+        </div>
+        <button class="primary" id="guidanceToggle" type="button">啟動即時定位</button>
+      </div>
+
+      <div class="guidance-main">
+        <div class="guidance-recommendation" id="guidanceRecommendation">
+          <span>目前建議</span>
+          <strong>尚未啟動</strong>
+          <small>啟動後會判斷方向、路段與建議車道。</small>
+        </div>
+        <div class="guidance-facts">
+          <article>
+            <span>方向</span>
+            <strong id="guidanceDirection">--</strong>
+          </article>
+          <article>
+            <span>路段</span>
+            <strong id="guidanceSegment">--</strong>
+          </article>
+          <article>
+            <span>速度</span>
+            <strong id="guidanceSpeed">-- km/h</strong>
+          </article>
+          <article>
+            <span>可信度</span>
+            <strong id="guidanceConfidence">--</strong>
+          </article>
+        </div>
+      </div>
+
+      <div class="guidance-note" id="guidanceNote">此功能是通勤輔助建議，不取代路況、導航與實際安全判斷。</div>
+    </section>
+
+    <section class="history-band record-view">
+      <div class="panel-head">
+        <div>
+          <h2>歷史紀錄</h2>
+          <p>先累積資料，後續可依星期、出發時間、路線版本與車道推估做建議。楊梅與新店座標目前使用區域中心，正式使用前建議改成住家與公司附近。</p>
+        </div>
+        <div class="history-actions">
+          <button class="text-button" id="uploadLatest" type="button">上傳最新</button>
+          <button class="text-button" id="uploadAll" type="button">上傳全部</button>
+          <button class="text-button" id="exportJson" type="button">匯出 JSON</button>
+          <button class="text-button" id="exportCsv" type="button">匯出完整 CSV</button>
+        </div>
+      </div>
+      <div class="upload-panel">
+        <span id="uploadStatus">已內建 Google Sheet 上傳位置；結束行程會自動上傳。</span>
+      </div>
+      <div class="history-list" id="historyList"></div>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
