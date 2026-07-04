@@ -1,6 +1,6 @@
 :root {
   color-scheme: light;
-  --bg: #f4f6f3;
+  --bg: #f7f8f6;
   --ink: #17211c;
   --muted: #617067;
   --line: #d5ddd4;
@@ -42,7 +42,7 @@ body {
   border: 1px solid rgba(23, 33, 28, .1);
   border-radius: 999px;
   background: rgba(255, 255, 255, .94);
-  box-shadow: 0 10px 28px rgba(20, 31, 26, .16);
+  box-shadow: 0 2px 8px rgba(20, 31, 26, .12);
   transform: translateX(-50%);
   backdrop-filter: blur(12px);
 }
@@ -113,7 +113,7 @@ button:disabled {
 .app-shell {
   width: min(1180px, calc(100% - 28px));
   margin: 0 auto;
-  padding: 58px 0 36px;
+  padding: 56px 0 36px;
 }
 
 .top-band {
@@ -121,7 +121,7 @@ button:disabled {
   grid-template-columns: minmax(0, 1fr) 210px;
   gap: 18px;
   align-items: stretch;
-  padding: 18px 0 14px;
+  padding: 14px 0 12px;
 }
 
 .eyebrow {
@@ -138,9 +138,9 @@ p {
 }
 
 h1 {
-  margin-bottom: 8px;
-  font-size: clamp(30px, 5vw, 54px);
-  line-height: 1.05;
+  margin-bottom: 6px;
+  font-size: clamp(26px, 4vw, 40px);
+  line-height: 1.12;
   letter-spacing: 0;
 }
 
@@ -153,7 +153,7 @@ h2 {
   max-width: 720px;
   margin-bottom: 0;
   color: var(--muted);
-  line-height: 1.55;
+  line-height: 1.45;
 }
 
 .status-tile,
@@ -240,6 +240,74 @@ h2 {
   display: flex;
   gap: 8px;
   flex: 0 0 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.drive-console {
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(0, 1.35fr) minmax(260px, .8fr);
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.drive-state,
+.drive-lane,
+.drive-mini-stats {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+}
+
+.drive-state,
+.drive-lane {
+  display: grid;
+  gap: 5px;
+  align-content: center;
+  min-height: 118px;
+  padding: 14px;
+}
+
+.drive-state span,
+.drive-lane span,
+.drive-mini-stats span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.drive-state strong,
+.drive-lane strong {
+  font-size: 34px;
+  line-height: 1.05;
+}
+
+.drive-state small,
+.drive-lane small {
+  color: var(--muted);
+  line-height: 1.35;
+}
+
+.drive-mini-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.drive-mini-stats div {
+  display: grid;
+  align-content: center;
+  gap: 6px;
+  min-height: 118px;
+  padding: 12px;
+  border-left: 1px solid var(--line);
+}
+
+.drive-mini-stats div:first-child {
+  border-left: 0;
+}
+
+.drive-mini-stats strong {
+  font-size: 20px;
+  line-height: 1.15;
 }
 
 .mode-switch {
@@ -550,7 +618,7 @@ h2 {
   justify-content: space-between;
   gap: 14px;
   align-items: center;
-  padding: 16px;
+  padding: 14px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--panel);
@@ -867,7 +935,8 @@ h2 {
 
 @media (max-width: 860px) {
   .top-band,
-  .work-area {
+  .work-area,
+  .drive-console {
     grid-template-columns: 1fr;
   }
 
@@ -935,6 +1004,25 @@ h2 {
 
   .dashboard-grid {
     grid-template-columns: 1fr 1fr;
+  }
+
+  .drive-console {
+    gap: 8px;
+  }
+
+  .drive-state,
+  .drive-lane {
+    min-height: 96px;
+  }
+
+  .drive-state strong,
+  .drive-lane strong {
+    font-size: 30px;
+  }
+
+  .drive-mini-stats div {
+    min-height: 76px;
+    padding: 10px;
   }
 
   .history-actions .text-button {

@@ -27,14 +27,24 @@ const els = {
   restoreBanner: document.querySelector("#restoreBanner"),
   restoreText: document.querySelector("#restoreText"),
   restoreTrip: document.querySelector("#restoreTrip"),
+  saveDraftTrip: document.querySelector("#saveDraftTrip"),
+  exportDraft: document.querySelector("#exportDraft"),
   discardDraft: document.querySelector("#discardDraft"),
   dashboardView: document.querySelector("#dashboardView"),
   dashboardVerdict: document.querySelector("#dashboardVerdict"),
   dashboardSummary: document.querySelector("#dashboardSummary"),
   dashboardDirections: document.querySelector("#dashboardDirections"),
   autoMode: document.querySelector("#autoMode"),
+  driveStatusMain: document.querySelector("#driveStatusMain"),
+  driveStatusDetail: document.querySelector("#driveStatusDetail"),
+  driveLaneMain: document.querySelector("#driveLaneMain"),
+  driveLaneDetail: document.querySelector("#driveLaneDetail"),
+  driveTime: document.querySelector("#driveTime"),
+  driveKm: document.querySelector("#driveKm"),
+  drivePoints: document.querySelector("#drivePoints"),
   startTrip: document.querySelector("#startTrip"),
   stopTrip: document.querySelector("#stopTrip"),
+  forceSaveTrip: document.querySelector("#forceSaveTrip"),
   cameraToggle: document.querySelector("#cameraToggle"),
   clearHistory: document.querySelector("#clearHistory"),
   exportJson: document.querySelector("#exportJson"),
@@ -202,8 +212,10 @@ function normalizeTrips(trips) {
 function isValidTrip(trip) {
   if (!trip) return false;
   const points = trip.points || [];
-  if (points.length < 2) return false;
-  return (trip.distanceMeters || 0) >= 50;
+  const hasGpsTrace = points.length >= 2;
+  const hasLaneData = (trip.laneSamples || []).length > 0;
+  const hasEvents = (trip.events || []).length > 1;
+  return hasGpsTrace || hasLaneData || hasEvents;
 }
 
 function loadUploadEndpoint() {
@@ -365,6 +377,7 @@ function stopTrip(source = "manual") {
   if (state.watchId !== null) navigator.geolocation.clearWatch(state.watchId);
   window.clearInterval(state.elapsedTimer);
 
+  saveTripDraft(true);
   state.trip.endedAt = new Date().toISOString();
   state.trip.direction = inferTripDirection(state.trip);
   state.trip.summary = summarizeTrip(state.trip);
@@ -377,7 +390,7 @@ function stopTrip(source = "manual") {
   if (shouldSave && state.uploadEndpoint) {
     void uploadTrip(finishedTrip, "結束後自動上傳");
   }
-  clearTripDraft();
+  if (shouldSave) clearTripDraft();
 
   state.trip = null;
   state.watchId = null;
@@ -388,13 +401,15 @@ function stopTrip(source = "manual") {
   els.stopTrip.disabled = true;
 
   if (!shouldSave) {
-    setStatus("已忽略空行程", "距離或定位點不足，未保存", false);
+    showRestoreDraft();
+    setStatus("尚未保存", "資料不足，草稿已保留，可用救援保存或匯出", false);
   } else if (state.autoMode && source === "auto") {
     setStatus("自動監看中", "上一趟已保存，等待下一趟", true);
   } else {
     setStatus("已完成紀錄", "已保存到本機歷史資料", false);
   }
   renderHistory();
+  drawRoute();
   updateRecordingOverlay();
 }
 
@@ -885,6 +900,7 @@ function updateMetrics(point) {
   els.pointCount.textContent = String(state.trip.points.length);
   const laneText = point.effectiveLane ? `；目前車道：${point.effectiveLane.label}` : "";
   setRouteNote(`最近定位精度約 ${Math.round(point.accuracy)} 公尺${laneText}`);
+  updateDriveConsole();
 }
 
 function updateElapsed() {
@@ -903,6 +919,7 @@ function updateRecordingOverlay() {
       els.recordingOverlay.classList.remove("is-recording");
     }
     updateFloatingRecorder(false, "未紀錄", state.autoMode ? "自動模式待命" : "GPS 待命");
+    updateDriveConsole();
     return;
   }
 
@@ -918,6 +935,39 @@ function updateRecordingOverlay() {
     els.recordingOverlay.classList.add("is-recording");
   }
   updateFloatingRecorder(true, "紀錄中", detail);
+  updateDriveConsole();
+}
+
+function updateDriveConsole() {
+  if (!els.driveStatusMain) return;
+
+  if (!state.trip) {
+    els.driveStatusMain.textContent = state.autoMode ? "自動待命" : "待命";
+    els.driveStatusDetail.textContent = state.autoMode ? "接近通勤起點後會自動開始" : "按下開始後會保存 GPS 與車道紀錄";
+    els.driveLaneMain.textContent = "未標記";
+    els.driveLaneDetail.textContent = "可用下方按鈕手動標記內／中／外線";
+    els.driveTime.textContent = "00:00";
+    els.driveKm.textContent = "0.0 km";
+    els.drivePoints.textContent = "0";
+    return;
+  }
+
+  const seconds = Math.floor((Date.now() - new Date(state.trip.startedAt).getTime()) / 1000);
+  const min = String(Math.floor(seconds / 60)).padStart(2, "0");
+  const sec = String(seconds % 60).padStart(2, "0");
+  const lane = getEffectiveLane();
+  const lastPoint = state.trip.points.at(-1);
+  els.driveStatusMain.textContent = "紀錄中";
+  els.driveStatusDetail.textContent = lastPoint
+    ? `最近定位精度約 ${Math.round(lastPoint.accuracy || 0)} 公尺`
+    : "等待第一個 GPS 定位點";
+  els.driveLaneMain.textContent = lane?.label || "未標記";
+  els.driveLaneDetail.textContent = lane
+    ? `${sourceLabel(lane.source)}｜${state.roadLaneCount} 線道`
+    : "建議手動標記，避免相機低信心誤判";
+  els.driveTime.textContent = `${min}:${sec}`;
+  els.driveKm.textContent = `${(state.trip.distanceMeters / 1000).toFixed(1)} km`;
+  els.drivePoints.textContent = String(state.trip.points.length);
 }
 
 function updateFloatingRecorder(active, title, detail) {
@@ -1723,6 +1773,76 @@ function exportJson() {
   downloadFile(`commute-records-${fileStamp()}.json`, JSON.stringify(payload, null, 2), "application/json;charset=utf-8");
 }
 
+function getRecoverableTrip() {
+  if (state.trip) return state.trip;
+  if (state.pendingDraft?.trip) return state.pendingDraft.trip;
+  return loadTripDraft()?.trip || null;
+}
+
+function prepareRecoveredTrip(rawTrip) {
+  if (!rawTrip) return null;
+  const trip = JSON.parse(JSON.stringify(rawTrip));
+  trip.id = trip.id || Date.now();
+  trip.startedAt = trip.startedAt || new Date().toISOString();
+  trip.endedAt = trip.endedAt || new Date().toISOString();
+  trip.direction = inferTripDirection(trip);
+  trip.summary = summarizeTrip(trip);
+  return isValidTrip(trip) ? trip : null;
+}
+
+function resetActiveTripUi() {
+  if (state.watchId !== null) navigator.geolocation.clearWatch(state.watchId);
+  window.clearInterval(state.elapsedTimer);
+  state.trip = null;
+  state.watchId = null;
+  state.elapsedTimer = null;
+  state.targetAnchor = null;
+  state.targetDwellStartedAt = null;
+  els.startTrip.disabled = false;
+  els.stopTrip.disabled = true;
+  updateRecordingOverlay();
+  drawRoute();
+}
+
+function saveRecoverableTrip() {
+  const recoveredTrip = prepareRecoveredTrip(getRecoverableTrip());
+  if (!recoveredTrip) {
+    setUploadStatus("目前沒有可救援保存的定位或車道資料。");
+    setStatus("沒有可救援資料", "目前草稿沒有定位點或車道事件", false);
+    return;
+  }
+
+  state.trips = normalizeTrips([
+    recoveredTrip,
+    ...state.trips.filter((trip) => String(trip.id) !== String(recoveredTrip.id)),
+  ]);
+  saveTrips();
+  clearTripDraft();
+  resetActiveTripUi();
+  renderHistory();
+  renderDashboard();
+  setStatus("已救援保存", "資料已寫入本機歷史紀錄", false);
+  setUploadStatus("已救援保存到本機；建議立刻按「匯出完整 CSV」或「上傳最新」。");
+}
+
+function exportRecoverableTrip() {
+  const recoveredTrip = prepareRecoveredTrip(getRecoverableTrip());
+  if (!recoveredTrip) {
+    setUploadStatus("目前沒有可匯出的草稿資料。");
+    return;
+  }
+
+  const payload = {
+    exportedAt: new Date().toISOString(),
+    app: "commute-memory",
+    version: 5,
+    type: "recovered_trip",
+    trip: recoveredTrip,
+  };
+  downloadFile(`commute-recovered-${fileStamp()}.json`, JSON.stringify(payload, null, 2), "application/json;charset=utf-8");
+  setUploadStatus("已匯出救援草稿 JSON；若要 Excel 明細，請先按「救援保存目前資料」再匯出完整 CSV。");
+}
+
 function exportCsv() {
   const trips = normalizeTrips(state.trips);
   const rows = [
@@ -2164,15 +2284,48 @@ function setStatus(title, detail, active) {
   els.recordStatus.querySelector("small").textContent = detail;
 }
 
+function clearAllLocalRecords() {
+  if (state.trip && !window.confirm("目前正在紀錄，確定要清除本機歷史、草稿與目前軌跡嗎？")) return;
+  if (state.watchId !== null) navigator.geolocation.clearWatch(state.watchId);
+  window.clearInterval(state.elapsedTimer);
+  state.trips = [];
+  state.trip = null;
+  state.watchId = null;
+  state.elapsedTimer = null;
+  state.targetAnchor = null;
+  state.targetDwellStartedAt = null;
+  state.pendingDraft = null;
+  localStorage.removeItem(storageKey);
+  localStorage.removeItem(legacyStorageKey);
+  localStorage.removeItem(draftStorageKey);
+  els.startTrip.disabled = false;
+  els.stopTrip.disabled = true;
+  els.restoreBanner?.classList.add("is-hidden");
+  els.elapsed.textContent = "00:00";
+  els.speed.textContent = "-- km/h";
+  els.distance.textContent = "0.0 km";
+  els.pointCount.textContent = "0";
+  setRouteNote("已清除本機歷史、草稿與目前軌跡。");
+  setStatus("已清除紀錄", "可重新開始累積資料", false);
+  updateRecordingOverlay();
+  updateDriveConsole();
+  drawRoute();
+  renderHistory();
+  renderDashboard();
+}
+
 els.autoMode.addEventListener("click", toggleAutoMode);
 els.modeRecord?.addEventListener("click", () => setViewMode("record"));
 els.modeGuidance?.addEventListener("click", () => setViewMode("guidance"));
 els.modeDashboard?.addEventListener("click", () => setViewMode("dashboard"));
 els.guidanceToggle?.addEventListener("click", toggleGuidance);
 els.restoreTrip?.addEventListener("click", restoreDraftTrip);
+els.saveDraftTrip?.addEventListener("click", saveRecoverableTrip);
+els.exportDraft?.addEventListener("click", exportRecoverableTrip);
 els.discardDraft?.addEventListener("click", clearTripDraft);
 els.startTrip.addEventListener("click", () => startTrip());
 els.stopTrip.addEventListener("click", () => stopTrip());
+els.forceSaveTrip?.addEventListener("click", saveRecoverableTrip);
 els.cameraToggle.addEventListener("click", toggleCamera);
 els.cameraSelect.addEventListener("change", switchCamera);
 els.zoomSlider.addEventListener("input", applyZoom);
@@ -2181,12 +2334,7 @@ els.exportCsv.addEventListener("click", exportCsv);
 els.uploadLatest.addEventListener("click", uploadLatestTrip);
 els.uploadAll.addEventListener("click", uploadAllTrips);
 els.saveUploadEndpoint?.addEventListener("click", saveUploadEndpoint);
-els.clearHistory.addEventListener("click", () => {
-  state.trips = [];
-  saveTrips();
-  renderHistory();
-  renderDashboard();
-});
+els.clearHistory.addEventListener("click", clearAllLocalRecords);
 els.flowButtons.querySelectorAll("button").forEach((button) => {
   button.addEventListener("click", () => setTrafficFlow(button.dataset.flow));
 });
@@ -2198,6 +2346,7 @@ els.zoomControl.classList.add("is-hidden");
 if (els.uploadEndpoint) els.uploadEndpoint.value = state.uploadEndpoint;
 setUploadStatus("已內建 Google Sheet 上傳位置；結束行程會自動上傳。");
 updateRecordingOverlay();
+updateDriveConsole();
 drawRouteGrid(els.routeCanvas.getContext("2d"), els.routeCanvas.width, els.routeCanvas.height);
 renderHistory();
 renderDashboard();

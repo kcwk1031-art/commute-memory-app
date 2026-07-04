@@ -15,9 +15,8 @@
   <main class="app-shell">
     <section class="top-band">
       <div>
-        <p class="eyebrow">楊梅 -> 新店</p>
         <h1>通勤路線記憶</h1>
-        <p class="summary">自動記錄 GPS 軌跡、速度與停滯路段；車道以影像推估為輔，低信心時改由手動標記避免誤判。</p>
+        <p class="summary">記錄 GPS、速度、車道標記與車流觀察。資料優先保存，分析與建議只在可信度足夠時顯示。</p>
       </div>
       <div class="status-tile" id="recordStatus">
         <span class="status-dot"></span>
@@ -39,7 +38,36 @@
       </div>
       <div class="restore-actions">
         <button class="primary" id="restoreTrip" type="button">恢復紀錄</button>
+        <button class="text-button" id="saveDraftTrip" type="button">保存草稿</button>
+        <button class="text-button" id="exportDraft" type="button">匯出草稿</button>
         <button class="text-button" id="discardDraft" type="button">忽略</button>
+      </div>
+    </section>
+
+    <section class="drive-console record-view" aria-label="開車主視圖">
+      <div class="drive-state">
+        <span>目前狀態</span>
+        <strong id="driveStatusMain">待命</strong>
+        <small id="driveStatusDetail">尚未開始紀錄</small>
+      </div>
+      <div class="drive-lane">
+        <span>車道紀錄</span>
+        <strong id="driveLaneMain">未標記</strong>
+        <small id="driveLaneDetail">可用下方按鈕手動標記內／中／外線</small>
+      </div>
+      <div class="drive-mini-stats">
+        <div>
+          <span>時間</span>
+          <strong id="driveTime">00:00</strong>
+        </div>
+        <div>
+          <span>距離</span>
+          <strong id="driveKm">0.0 km</strong>
+        </div>
+        <div>
+          <span>資料</span>
+          <strong id="drivePoints">0</strong>
+        </div>
       </div>
     </section>
 
@@ -47,6 +75,7 @@
       <button class="secondary" id="autoMode" type="button">啟動自動模式</button>
       <button class="primary main-action" id="startTrip" type="button">立即開始紀錄</button>
       <button class="primary main-action stop-action" id="stopTrip" type="button" disabled>結束並保存</button>
+      <button class="secondary minor-action" id="forceSaveTrip" type="button">救援保存目前資料</button>
       <button class="secondary minor-action" id="cameraToggle" type="button">相機車道偵測</button>
     </section>
 
@@ -143,9 +172,8 @@
     <section class="dashboard-view is-hidden" id="dashboardView" aria-label="通勤分析看板">
       <div class="dashboard-hero">
         <div>
-          <p class="eyebrow">資料分析</p>
           <h2>歷史車道趨勢</h2>
-          <p>依照已保存的 GPS 明細、車道紀錄與方向分類，顯示目前可參考的通勤趨勢。</p>
+          <p>依方向、路段與手動車道紀錄整理趨勢；樣本不足時不給強建議。</p>
         </div>
         <strong id="dashboardVerdict">資料讀取中</strong>
       </div>
@@ -157,7 +185,6 @@
     <section class="guidance-view is-hidden" id="guidanceView" aria-label="開車即時建議">
       <div class="guidance-hero">
         <div>
-          <p class="eyebrow">開車即時</p>
           <h2 id="guidanceTitle">準備啟動定位</h2>
           <p id="guidanceSubtitle">依目前 GPS 位置與過去同方向紀錄，提供保守車道建議。</p>
         </div>
