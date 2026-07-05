@@ -356,24 +356,32 @@ function startTrip(options = {}) {
 
   recordEvent("settings", currentManualState());
   saveTripDraft(true);
-
-  if (options.source !== "auto") {
-    state.watchId = navigator.geolocation.watchPosition(handlePosition, handleGeoError, {
-      enableHighAccuracy: true,
-      maximumAge: 1000,
-      timeout: 12000,
-    });
-  }
-
-  state.elapsedTimer = window.setInterval(updateElapsed, 1000);
   els.startTrip.disabled = true;
   els.stopTrip.disabled = false;
   setStatus("紀錄中", options.source === "auto" ? "自動模式已開筆" : "GPS 軌跡正在寫入", true);
   updateElapsed();
+
+  if (options.source !== "auto") {
+    try {
+      state.watchId = navigator.geolocation.watchPosition(handlePosition, handleGeoError, {
+        enableHighAccuracy: true,
+        maximumAge: 1000,
+        timeout: 12000,
+      });
+    } catch (err) {
+      setRouteNote(`定位啟動失敗，但草稿已建立：${err.message}`);
+      setStatus("定位未啟動", "可稍後重試；目前草稿已保留", true);
+    }
+  }
+
+  state.elapsedTimer = window.setInterval(updateElapsed, 1000);
 }
 
 function stopTrip(source = "manual") {
-  if (!state.trip) return;
+  if (!state.trip) {
+    saveRecoverableTrip();
+    return;
+  }
   if (state.watchId !== null) navigator.geolocation.clearWatch(state.watchId);
   window.clearInterval(state.elapsedTimer);
 
@@ -398,7 +406,7 @@ function stopTrip(source = "manual") {
   state.targetAnchor = null;
   state.targetDwellStartedAt = null;
   els.startTrip.disabled = false;
-  els.stopTrip.disabled = true;
+  els.stopTrip.disabled = false;
 
   if (!shouldSave) {
     showRestoreDraft();
@@ -497,9 +505,14 @@ function movementStatus(kmh) {
 
 function handleGeoError(err) {
   setRouteNote(`定位無法啟動：${err.message}`);
-  els.startTrip.disabled = false;
-  els.stopTrip.disabled = true;
-  setStatus("定位失敗", "請確認瀏覽器定位權限", false);
+  els.startTrip.disabled = Boolean(state.trip);
+  els.stopTrip.disabled = false;
+  if (state.trip) {
+    saveTripDraft(true);
+    setStatus("定位暫時失敗", "草稿已保留，可結束保存或救援", true);
+  } else {
+    setStatus("定位失敗", "請確認瀏覽器定位權限", false);
+  }
 }
 
 async function toggleCamera() {
@@ -529,10 +542,11 @@ async function startCamera() {
     }
 
     state.cameraStream = await navigator.mediaDevices.getUserMedia({ video, audio: false });
+    els.cameraToggle.closest(".lane-panel")?.classList.add("camera-active");
     els.cameraFeed.srcObject = state.cameraStream;
     await els.cameraFeed.play();
     els.cameraEmpty.style.display = "none";
-    els.cameraToggle.textContent = "關閉車道偵測";
+    els.cameraToggle.textContent = "關閉相機實驗";
     await refreshCameraDevices();
     setupZoomControl();
     analyzeLaneFrame();
@@ -549,8 +563,9 @@ function stopCamera() {
   state.cameraStream = null;
   window.cancelAnimationFrame(state.laneAnimation);
   els.cameraFeed.srcObject = null;
+  els.cameraToggle.closest(".lane-panel")?.classList.remove("camera-active");
   els.cameraEmpty.style.display = "grid";
-  els.cameraToggle.textContent = "啟動車道偵測";
+  els.cameraToggle.textContent = "相機實驗功能";
   els.laneResult.textContent = getEffectiveLane()?.label || "尚無資料";
   els.laneConfidence.textContent = "信心度 --";
   els.zoomControl.classList.add("is-hidden");
@@ -617,13 +632,27 @@ function analyzeLaneFrame() {
   canvas.height = height;
   const ctx = canvas.getContext("2d", { willReadFrequently: true });
 
-  ctx.drawImage(video, 0, 0, width, height);
+  drawVideoContained(ctx, video, width, height);
   const image = ctx.getImageData(0, 0, width, height);
   const result = detectLanePosition(image, width, height);
   drawLaneOverlay(ctx, width, height, result);
   setLaneResult(result);
 
   state.laneAnimation = window.requestAnimationFrame(analyzeLaneFrame);
+}
+
+function drawVideoContained(ctx, video, width, height) {
+  ctx.fillStyle = "#111b18";
+  ctx.fillRect(0, 0, width, height);
+
+  const sourceWidth = video.videoWidth || width;
+  const sourceHeight = video.videoHeight || height;
+  const scale = Math.min(width / sourceWidth, height / sourceHeight);
+  const drawWidth = sourceWidth * scale;
+  const drawHeight = sourceHeight * scale;
+  const offsetX = (width - drawWidth) / 2;
+  const offsetY = (height - drawHeight) / 2;
+  ctx.drawImage(video, offsetX, offsetY, drawWidth, drawHeight);
 }
 
 function detectLanePosition(image, width, height) {
@@ -1799,7 +1828,7 @@ function resetActiveTripUi() {
   state.targetAnchor = null;
   state.targetDwellStartedAt = null;
   els.startTrip.disabled = false;
-  els.stopTrip.disabled = true;
+  els.stopTrip.disabled = false;
   updateRecordingOverlay();
   drawRoute();
 }
@@ -2299,7 +2328,7 @@ function clearAllLocalRecords() {
   localStorage.removeItem(legacyStorageKey);
   localStorage.removeItem(draftStorageKey);
   els.startTrip.disabled = false;
-  els.stopTrip.disabled = true;
+  els.stopTrip.disabled = false;
   els.restoreBanner?.classList.add("is-hidden");
   els.elapsed.textContent = "00:00";
   els.speed.textContent = "-- km/h";

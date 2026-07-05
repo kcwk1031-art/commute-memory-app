@@ -525,7 +525,8 @@ h2 {
 }
 
 #cameraFeed {
-  object-fit: cover;
+  object-fit: contain;
+  background: #111b18;
 }
 
 #laneCanvas {
@@ -581,6 +582,21 @@ h2 {
 
 .lane-readout strong {
   font-size: 24px;
+}
+
+.camera-controls,
+.camera-stage,
+.lane-readout {
+  display: none;
+}
+
+.lane-panel.camera-active .camera-controls,
+.lane-panel.camera-active .lane-readout {
+  display: grid;
+}
+
+.lane-panel.camera-active .camera-stage {
+  display: block;
 }
 
 .route-canvas {
