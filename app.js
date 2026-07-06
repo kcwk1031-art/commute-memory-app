@@ -98,6 +98,7 @@ const state = {
   targetAnchor: null,
   targetDwellStartedAt: null,
   lastDraftSavedAt: 0,
+  lastFloatingSignature: "",
   pendingDraft: null,
   uploadEndpoint: loadUploadEndpoint(),
   trips: loadTrips(),
@@ -210,12 +211,7 @@ function normalizeTrips(trips) {
 }
 
 function isValidTrip(trip) {
-  if (!trip) return false;
-  const points = trip.points || [];
-  const hasGpsTrace = points.length >= 2;
-  const hasLaneData = (trip.laneSamples || []).length > 0;
-  const hasEvents = (trip.events || []).length > 1;
-  return hasGpsTrace || hasLaneData || hasEvents;
+  return Boolean(trip?.startedAt || trip?.id);
 }
 
 function loadUploadEndpoint() {
@@ -390,15 +386,12 @@ function stopTrip(source = "manual") {
   state.trip.direction = inferTripDirection(state.trip);
   state.trip.summary = summarizeTrip(state.trip);
   const finishedTrip = state.trip;
-  const shouldSave = isValidTrip(finishedTrip);
-  if (shouldSave) {
-    state.trips.unshift(finishedTrip);
-    saveTrips();
-  }
-  if (shouldSave && state.uploadEndpoint) {
+  state.trips.unshift(finishedTrip);
+  saveTrips();
+  if (state.uploadEndpoint) {
     void uploadTrip(finishedTrip, "結束後自動上傳");
   }
-  if (shouldSave) clearTripDraft();
+  clearTripDraft();
 
   state.trip = null;
   state.watchId = null;
@@ -408,10 +401,7 @@ function stopTrip(source = "manual") {
   els.startTrip.disabled = false;
   els.stopTrip.disabled = false;
 
-  if (!shouldSave) {
-    showRestoreDraft();
-    setStatus("尚未保存", "資料不足，草稿已保留，可用救援保存或匯出", false);
-  } else if (state.autoMode && source === "auto") {
+  if (state.autoMode && source === "auto") {
     setStatus("自動監看中", "上一趟已保存，等待下一趟", true);
   } else {
     setStatus("已完成紀錄", "已保存到本機歷史資料", false);
@@ -1001,6 +991,9 @@ function updateDriveConsole() {
 
 function updateFloatingRecorder(active, title, detail) {
   if (!els.floatingRecorder) return;
+  const signature = `${active}|${title}|${detail}`;
+  if (state.lastFloatingSignature === signature) return;
+  state.lastFloatingSignature = signature;
   els.floatingRecorder.classList.toggle("is-recording", active);
   els.floatingRecorder.querySelector("strong").textContent = title;
   els.floatingRecorder.querySelector("small").textContent = detail;
@@ -1408,7 +1401,7 @@ function toggleGuidance() {
     maximumAge: 1000,
     timeout: 12000,
   });
-  updateFloatingRecorder(true, "即時建議中", "GPS 定位啟動");
+  if (!state.trip) updateFloatingRecorder(true, "即時建議中", "GPS 定位啟動");
 }
 
 function stopGuidance() {
@@ -1479,7 +1472,7 @@ function handleGuidancePosition(pos) {
       detail: recommendation.detail,
       level: recommendation.level,
     });
-    updateFloatingRecorder(true, "即時建議中", `${directionLabel}｜${segment.label}｜${recommendation.title}`);
+    if (!state.trip) updateFloatingRecorder(true, "即時建議中", `${directionLabel}｜${segment.label}｜${recommendation.title}`);
   }
 
   state.lastGuidancePoint = point;
