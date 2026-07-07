@@ -809,6 +809,63 @@ h2 {
   line-height: 1.45;
 }
 
+.cctv-panel {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+}
+
+.cctv-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.cctv-head h3 {
+  margin: 0 0 6px;
+  font-size: 20px;
+}
+
+.cctv-head p,
+.cctv-meta {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.cctv-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 8px;
+}
+
+.cctv-frame {
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  min-height: 220px;
+  border-radius: 8px;
+  background: #101916;
+}
+
+.cctv-image {
+  display: block;
+  width: 100%;
+  max-height: 360px;
+  object-fit: contain;
+  background: #101916;
+}
+
+.cctv-empty {
+  padding: 24px;
+  color: #c7d4cd;
+  text-align: center;
+}
+
 .dashboard-grid,
 .direction-grid {
   display: grid;
@@ -1008,6 +1065,15 @@ h2 {
   .dashboard-hero,
   .guidance-hero {
     display: grid;
+  }
+
+  .cctv-head,
+  .cctv-actions {
+    display: grid;
+  }
+
+  .cctv-actions {
+    grid-template-columns: 1fr;
   }
 
   .dashboard-hero strong {

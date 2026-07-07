@@ -218,6 +218,23 @@
       </div>
 
       <div class="guidance-note" id="guidanceNote">此功能是通勤輔助建議，不取代路況、導航與實際安全判斷。</div>
+
+      <div class="cctv-panel" id="cctvPanel">
+        <div class="cctv-head">
+          <div>
+            <h3>前方即時影像</h3>
+            <p id="cctvStatus">啟動即時定位後，可嘗試載入前方約 1 公里內的國道 CCTV。</p>
+          </div>
+          <div class="cctv-actions">
+            <button class="secondary" id="loadCctv" type="button">載入前方影像</button>
+            <button class="text-button" id="clearCctv" type="button">清除影像</button>
+          </div>
+        </div>
+        <div class="cctv-frame" id="cctvFrame">
+          <div class="cctv-empty">尚未載入影像</div>
+        </div>
+        <div class="cctv-meta" id="cctvMeta">資料來源：交通部 TDX 國道 CCTV 開放資料。影像可能延遲或暫時無法播放。</div>
+      </div>
     </section>
 
     <section class="history-band record-view">
@@ -240,6 +257,7 @@
     </section>
   </main>
 
+  <script src="seed-data.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

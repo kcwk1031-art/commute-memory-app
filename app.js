@@ -3,6 +3,14 @@ const legacyStorageKey = "commute-memory-trips-v1";
 const draftStorageKey = "commute-memory-trip-draft-v1";
 const uploadEndpointKey = "commute-memory-upload-endpoint";
 const defaultUploadEndpoint = "https://script.google.com/macros/s/AKfycbxyCTrMum6RvHmj2n0O5Yh4In8w4uUiGshhLI1ByLx0skZpJJbGQivfBJIl91LtDmc/exec";
+const seedTrips = Array.isArray(window.COMMUTE_SEED_TRIPS) ? window.COMMUTE_SEED_TRIPS : [];
+const maxStoredTrips = 30;
+const maxStoredPoints = 900;
+const maxDraftPoints = 700;
+const cctvEndpoint = "https://tdx.transportdata.tw/api/basic/v2/Road/Traffic/CCTV/Freeway?$format=JSON";
+const cctvCacheMs = 6 * 60 * 60 * 1000;
+const cctvMaxDistanceMeters = 1200;
+const cctvForwardBearingTolerance = 80;
 const minVisionConfidence = 45;
 const expectedCommuteMeters = 47000;
 const maxReliableAccuracyMeters = 180;
@@ -24,6 +32,11 @@ const els = {
   guidanceSpeed: document.querySelector("#guidanceSpeed"),
   guidanceConfidence: document.querySelector("#guidanceConfidence"),
   guidanceNote: document.querySelector("#guidanceNote"),
+  loadCctv: document.querySelector("#loadCctv"),
+  clearCctv: document.querySelector("#clearCctv"),
+  cctvStatus: document.querySelector("#cctvStatus"),
+  cctvFrame: document.querySelector("#cctvFrame"),
+  cctvMeta: document.querySelector("#cctvMeta"),
   restoreBanner: document.querySelector("#restoreBanner"),
   restoreText: document.querySelector("#restoreText"),
   restoreTrip: document.querySelector("#restoreTrip"),
@@ -86,6 +99,10 @@ const state = {
   lastAutoPoint: null,
   lastGuidancePoint: null,
   guidanceActive: false,
+  cctvList: [],
+  cctvLoadedAt: 0,
+  cctvLoading: false,
+  lastCctvPoint: null,
   elapsedTimer: null,
   cameraStream: null,
   laneAnimation: null,
@@ -98,6 +115,7 @@ const state = {
   targetAnchor: null,
   targetDwellStartedAt: null,
   lastDraftSavedAt: 0,
+  lastRouteDrawAt: 0,
   lastFloatingSignature: "",
   pendingDraft: null,
   uploadEndpoint: loadUploadEndpoint(),
@@ -112,35 +130,67 @@ const commuteAnchors = {
 state.trips = normalizeTrips(state.trips);
 
 function loadTrips() {
+  let storedTrips = [];
   try {
     const current = JSON.parse(localStorage.getItem(storageKey));
-    if (Array.isArray(current)) return current;
+    if (Array.isArray(current)) storedTrips = current;
   } catch {}
 
-  try {
-    const legacy = JSON.parse(localStorage.getItem(legacyStorageKey));
-    return Array.isArray(legacy) ? legacy : [];
-  } catch {
-    return [];
+  if (!storedTrips.length) {
+    try {
+      const legacy = JSON.parse(localStorage.getItem(legacyStorageKey));
+      if (Array.isArray(legacy)) storedTrips = legacy;
+    } catch {}
   }
+
+  return mergeTrips(storedTrips, seedTrips);
 }
 
 function saveTrips() {
   state.trips = normalizeTrips(state.trips);
-  localStorage.setItem(storageKey, JSON.stringify(state.trips.slice(0, 80)));
+  const localTrips = state.trips.filter((trip) => !trip.imported).slice(0, maxStoredTrips);
+  const compactTrips = localTrips.map((trip) => compactTripForStorage(trip, maxStoredPoints));
+  try {
+    localStorage.setItem(storageKey, JSON.stringify(compactTrips));
+  } catch (err) {
+    const emergencyTrips = compactTrips.slice(0, 12).map((trip) => compactTripForStorage(trip, 350));
+    try {
+      localStorage.setItem(storageKey, JSON.stringify(emergencyTrips));
+      setStatus("已保存精簡紀錄", "手機容量不足，已保留車道變化與抽樣軌跡", false);
+      setRouteNote("手機儲存空間不足，本次已改存精簡版；建議抵達後匯出或上傳。");
+    } catch {
+      setStatus("保存失敗", "手機瀏覽器儲存空間不足，請先匯出救援檔", true);
+      setRouteNote(`保存失敗：${err.message || "瀏覽器儲存空間不足"}`);
+      throw err;
+    }
+  }
 }
 
 function saveTripDraft(force = false) {
   if (!state.trip) return;
   const now = Date.now();
-  if (!force && now - state.lastDraftSavedAt < 15000 && (state.trip.points.length % 5 !== 0)) return;
+  if (!force && now - state.lastDraftSavedAt < 30000 && (state.trip.points.length % 20 !== 0)) return;
   state.trip.summary = summarizeTrip(state.trip);
-  localStorage.setItem(draftStorageKey, JSON.stringify({
-    savedAt: new Date().toISOString(),
-    trip: state.trip,
-    manualState: currentManualState(),
-  }));
-  state.lastDraftSavedAt = now;
+  try {
+    localStorage.setItem(draftStorageKey, JSON.stringify({
+      savedAt: new Date().toISOString(),
+      trip: compactTripForStorage(state.trip, maxDraftPoints),
+      manualState: currentManualState(),
+    }));
+    state.lastDraftSavedAt = now;
+  } catch (err) {
+    try {
+      localStorage.setItem(draftStorageKey, JSON.stringify({
+        savedAt: new Date().toISOString(),
+        trip: compactTripForStorage(state.trip, 250),
+        manualState: currentManualState(),
+      }));
+      state.lastDraftSavedAt = now;
+      setRouteNote("手機儲存空間偏滿，草稿已改存精簡版。");
+    } catch {
+      setRouteNote(`草稿暫存失敗：${err.message || "瀏覽器儲存空間不足"}`);
+    }
+  }
 }
 
 function loadTripDraft() {
@@ -195,6 +245,56 @@ function restoreDraftTrip() {
   drawRoute();
   saveTripDraft(true);
   els.restoreBanner?.classList.add("is-hidden");
+}
+
+function mergeTrips(primaryTrips, secondaryTrips) {
+  const seen = new Set();
+  return [...(primaryTrips || []), ...(secondaryTrips || [])].filter((trip) => {
+    const id = String(trip?.id || trip?.startedAt || "");
+    if (!id || seen.has(id)) return false;
+    seen.add(id);
+    return true;
+  });
+}
+
+function compactTripForStorage(trip, maxPoints = maxStoredPoints) {
+  const copy = {
+    ...trip,
+    points: samplePoints(trip.points || [], maxPoints),
+    laneSamples: compactLaneSamples(trip.laneSamples || []),
+    events: (trip.events || []).slice(-250),
+  };
+  copy.summary = summarizeTrip(copy);
+  return copy;
+}
+
+function samplePoints(points, maxPoints) {
+  if (!Array.isArray(points) || points.length <= maxPoints) return points || [];
+  const step = Math.ceil(points.length / maxPoints);
+  const sampled = points.filter((_, index) => index % step === 0);
+  const last = points.at(-1);
+  if (last && sampled.at(-1) !== last) sampled.push(last);
+  return sampled;
+}
+
+function compactLaneSamples(samples) {
+  const compacted = [];
+  for (const sample of samples || []) {
+    const previous = compacted.at(-1);
+    if (
+      previous &&
+      previous.lane === sample.lane &&
+      previous.flow === sample.flow &&
+      previous.roadLaneCount === sample.roadLaneCount &&
+      previous.source === sample.source
+    ) {
+      previous.until = sample.at;
+      previous.count = (previous.count || 1) + 1;
+      continue;
+    }
+    compacted.push({ ...sample, count: 1 });
+  }
+  return compacted.slice(-900);
 }
 
 function normalizeTrips(trips) {
@@ -387,7 +487,18 @@ function stopTrip(source = "manual") {
   state.trip.summary = summarizeTrip(state.trip);
   const finishedTrip = state.trip;
   state.trips.unshift(finishedTrip);
-  saveTrips();
+  try {
+    saveTrips();
+  } catch {
+    saveTripDraft(true);
+    els.startTrip.disabled = false;
+    els.stopTrip.disabled = false;
+    setStatus("尚未保存", "手機儲存空間不足，草稿仍保留，請先按救援匯出", true);
+    renderHistory();
+    drawRoute(true);
+    updateRecordingOverlay();
+    return;
+  }
   if (state.uploadEndpoint) {
     void uploadTrip(finishedTrip, "結束後自動上傳");
   }
@@ -441,7 +552,6 @@ function handlePosition(pos) {
       laneIndex: effectiveLane.laneIndex ?? null,
       flow: state.trafficFlow,
     });
-    saveTripDraft();
   }
 
   updateMetrics(point);
@@ -1073,10 +1183,13 @@ function inferTripDirection(trip) {
   return trip.direction || "manual";
 }
 
-function drawRoute() {
+function drawRoute(force = false) {
   const canvas = els.routeCanvas;
   const ctx = canvas.getContext("2d");
   const points = state.trip?.points || [];
+  const now = Date.now();
+  if (!force && points.length > 80 && now - state.lastRouteDrawAt < 1500) return;
+  state.lastRouteDrawAt = now;
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   drawRouteGrid(ctx, canvas.width, canvas.height);
 
@@ -1144,18 +1257,22 @@ function summarizeTrip(trip) {
   const ended = trip.endedAt ? new Date(trip.endedAt).getTime() : Date.now();
   const minutes = Math.max(0, Math.round((ended - started) / 60000));
   const laneCounts = (trip.laneSamples || []).reduce((acc, sample) => {
-    acc[sample.lane] = (acc[sample.lane] || 0) + 1;
+    acc[sample.lane] = (acc[sample.lane] || 0) + (sample.count || 1);
     return acc;
   }, {});
   const mainLane = Object.entries(laneCounts).sort((a, b) => b[1] - a[1])[0]?.[0] || "無有效車道資料";
-  const manualSamples = (trip.laneSamples || []).filter((sample) => sample.source === "manual").length;
-  const visionSamples = (trip.laneSamples || []).filter((sample) => sample.source === "vision").length;
+  const manualSamples = (trip.laneSamples || [])
+    .filter((sample) => sample.source === "manual")
+    .reduce((sum, sample) => sum + (sample.count || 1), 0);
+  const visionSamples = (trip.laneSamples || [])
+    .filter((sample) => sample.source === "vision")
+    .reduce((sum, sample) => sum + (sample.count || 1), 0);
   const lastPoint = trip.points?.at?.(-1);
   return {
     minutes,
     km: Number(((trip.distanceMeters || 0) / 1000).toFixed(1)),
     points: trip.points?.length || 0,
-    laneSamples: trip.laneSamples?.length || 0,
+    laneSamples: (trip.laneSamples || []).reduce((sum, sample) => sum + (sample.count || 1), 0),
     manualSamples,
     visionSamples,
     mainLane,
@@ -1476,6 +1593,10 @@ function handleGuidancePosition(pos) {
   }
 
   state.lastGuidancePoint = point;
+  state.lastCctvPoint = point;
+  if (state.cctvList.length && els.cctvFrame?.querySelector?.(".cctv-image")) {
+    renderNearestCctv(point, direction);
+  }
 }
 
 function handleGuidanceError(error) {
@@ -1512,6 +1633,129 @@ function updateGuidanceView(view) {
       <small>${view.detail}</small>
     `;
   }
+}
+
+async function loadForwardCctv() {
+  const point = state.lastGuidancePoint || state.trip?.points?.at?.(-1);
+  if (!point) {
+    setCctvStatus("尚未取得 GPS 位置；請先啟動即時定位，或開始紀錄後再載入。");
+    return;
+  }
+  if ((point.accuracy || 0) > maxReliableAccuracyMeters) {
+    setCctvStatus(`GPS 精度約 ${Math.round(point.accuracy || 0)} 公尺，可能找錯鏡頭；請等定位穩定後再試。`);
+    return;
+  }
+
+  try {
+    setCctvStatus("正在讀取國道 CCTV 清單...");
+    const cctvs = await fetchCctvList();
+    if (!cctvs.length) {
+      setCctvStatus("目前讀不到 CCTV 清單，稍後再試。");
+      clearCctvFrame("尚無可用影像");
+      return;
+    }
+    renderNearestCctv(point, inferLiveDirection(point, state.lastGuidancePoint));
+  } catch (err) {
+    setCctvStatus(`CCTV 讀取失敗：${err.message || "資料源暫時不可用"}`);
+    clearCctvFrame("影像資料暫時無法載入");
+  }
+}
+
+async function fetchCctvList() {
+  const now = Date.now();
+  if (state.cctvList.length && now - state.cctvLoadedAt < cctvCacheMs) return state.cctvList;
+  if (state.cctvLoading) return state.cctvList;
+
+  state.cctvLoading = true;
+  try {
+    const response = await fetch(cctvEndpoint, { cache: "force-cache" });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const payload = await response.json();
+    state.cctvList = (payload.CCTVs || [])
+      .filter((camera) => camera.VideoStreamURL && camera.PositionLat && camera.PositionLon)
+      .map((camera) => ({
+        id: camera.CCTVID,
+        url: camera.VideoStreamURL,
+        lat: Number(camera.PositionLat),
+        lng: Number(camera.PositionLon),
+        road: camera.RoadName || camera.RoadID || "國道",
+        direction: camera.RoadDirection || "",
+        section: `${camera.RoadSection?.Start || ""}${camera.RoadSection?.End ? ` → ${camera.RoadSection.End}` : ""}`.trim(),
+        mile: camera.LocationMile || "",
+      }));
+    state.cctvLoadedAt = now;
+    return state.cctvList;
+  } finally {
+    state.cctvLoading = false;
+  }
+}
+
+function renderNearestCctv(point, direction) {
+  const selected = selectForwardCctv(point, direction);
+  if (!selected) {
+    clearCctvFrame("附近 1 公里內沒有可用國道影像");
+    setCctvStatus("目前位置附近沒有符合方向的國道 CCTV。");
+    return;
+  }
+
+  const distanceLabel = selected.distance < 1000
+    ? `${Math.round(selected.distance)} m`
+    : `${(selected.distance / 1000).toFixed(1)} km`;
+  const directionText = selected.direction ? `｜${selected.direction}` : "";
+  if (els.cctvFrame) {
+    els.cctvFrame.innerHTML = `
+      <img class="cctv-image" src="${selected.url}" alt="${selected.road} ${selected.mile} CCTV 即時影像">
+    `;
+  }
+  setCctvStatus(`已載入 ${selected.road}${directionText} ${selected.mile || ""}，距離約 ${distanceLabel}。`);
+  if (els.cctvMeta) {
+    els.cctvMeta.textContent = selected.section
+      ? `${selected.section}｜資料來源：交通部 TDX 國道 CCTV 開放資料。`
+      : "資料來源：交通部 TDX 國道 CCTV 開放資料。";
+  }
+}
+
+function selectForwardCctv(point, direction) {
+  const heading = getEffectiveHeading(point, direction);
+  const candidates = state.cctvList
+    .map((camera) => {
+      const distance = distanceBetween(point, { lat: camera.lat, lng: camera.lng });
+      const bearing = bearingBetween(point, { lat: camera.lat, lng: camera.lng });
+      const bearingDelta = Number.isFinite(heading) ? Math.abs(angleDelta(heading, bearing)) : 0;
+      return { ...camera, distance, bearingDelta };
+    })
+    .filter((camera) => camera.distance <= cctvMaxDistanceMeters)
+    .filter((camera) => !Number.isFinite(heading) || camera.bearingDelta <= cctvForwardBearingTolerance);
+
+  return candidates.sort((a, b) => {
+    const scoreA = a.distance + a.bearingDelta * 8;
+    const scoreB = b.distance + b.bearingDelta * 8;
+    return scoreA - scoreB;
+  })[0] || null;
+}
+
+function getEffectiveHeading(point, direction) {
+  if (typeof point.heading === "number" && point.heading >= 0) return point.heading;
+  if (direction === "yangmei_to_xindian") return bearingBetween(point, commuteAnchors.xindian);
+  if (direction === "xindian_to_yangmei") return bearingBetween(point, commuteAnchors.yangmei);
+  if (state.lastGuidancePoint && distanceBetween(state.lastGuidancePoint, point) >= 20) {
+    return bearingBetween(state.lastGuidancePoint, point);
+  }
+  return NaN;
+}
+
+function clearCctv() {
+  clearCctvFrame("尚未載入影像");
+  setCctvStatus("已清除影像；需要時可重新載入前方 CCTV。");
+  if (els.cctvMeta) els.cctvMeta.textContent = "資料來源：交通部 TDX 國道 CCTV 開放資料。影像可能延遲或暫時無法播放。";
+}
+
+function clearCctvFrame(message) {
+  if (els.cctvFrame) els.cctvFrame.innerHTML = `<div class="cctv-empty">${message}</div>`;
+}
+
+function setCctvStatus(message) {
+  if (els.cctvStatus) els.cctvStatus.textContent = message;
 }
 
 function inferLiveDirection(point, previousPoint) {
@@ -2341,6 +2585,8 @@ els.modeRecord?.addEventListener("click", () => setViewMode("record"));
 els.modeGuidance?.addEventListener("click", () => setViewMode("guidance"));
 els.modeDashboard?.addEventListener("click", () => setViewMode("dashboard"));
 els.guidanceToggle?.addEventListener("click", toggleGuidance);
+els.loadCctv?.addEventListener("click", loadForwardCctv);
+els.clearCctv?.addEventListener("click", clearCctv);
 els.restoreTrip?.addEventListener("click", restoreDraftTrip);
 els.saveDraftTrip?.addEventListener("click", saveRecoverableTrip);
 els.exportDraft?.addEventListener("click", exportRecoverableTrip);
