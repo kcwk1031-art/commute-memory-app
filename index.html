@@ -223,16 +223,31 @@
         <div class="cctv-head">
           <div>
             <h3>前方即時影像</h3>
-            <p id="cctvStatus">啟動即時定位後，可嘗試載入前方約 1 公里內的國道 CCTV。</p>
+            <p id="cctvStatus">啟動即時定位後，可載入前方約 1 公里內的國道 CCTV。</p>
           </div>
           <div class="cctv-actions">
             <button class="secondary" id="loadCctv" type="button">載入前方影像</button>
             <button class="text-button" id="clearCctv" type="button">清除影像</button>
           </div>
         </div>
+        <div class="cctv-facts" aria-label="前方影像判斷資訊">
+          <article>
+            <span>可信度</span>
+            <strong id="cctvConfidence">--</strong>
+          </article>
+          <article>
+            <span>距離</span>
+            <strong id="cctvDistance">--</strong>
+          </article>
+          <article>
+            <span>方向</span>
+            <strong id="cctvDirection">--</strong>
+          </article>
+        </div>
         <div class="cctv-frame" id="cctvFrame">
           <div class="cctv-empty">尚未載入影像</div>
         </div>
+        <div class="cctv-candidates" id="cctvCandidateList"></div>
         <div class="cctv-meta" id="cctvMeta">資料來源：交通部 TDX 國道 CCTV 開放資料。影像可能延遲或暫時無法播放。</div>
       </div>
     </section>

@@ -35,7 +35,11 @@ const els = {
   loadCctv: document.querySelector("#loadCctv"),
   clearCctv: document.querySelector("#clearCctv"),
   cctvStatus: document.querySelector("#cctvStatus"),
+  cctvConfidence: document.querySelector("#cctvConfidence"),
+  cctvDistance: document.querySelector("#cctvDistance"),
+  cctvDirection: document.querySelector("#cctvDirection"),
   cctvFrame: document.querySelector("#cctvFrame"),
+  cctvCandidateList: document.querySelector("#cctvCandidateList"),
   cctvMeta: document.querySelector("#cctvMeta"),
   restoreBanner: document.querySelector("#restoreBanner"),
   restoreText: document.querySelector("#restoreText"),
@@ -125,6 +129,21 @@ const state = {
 const commuteAnchors = {
   yangmei: { lat: 24.9186, lng: 121.1458, radiusMeters: 8500, label: "楊梅區域" },
   xindian: { lat: 24.9676, lng: 121.5414, radiusMeters: 6500, label: "新店區域" },
+};
+
+const routeLaneProfiles = {
+  yangmei_to_xindian: [
+    { label: "楊梅端", roadLaneCount: 3, confidence: "medium", source: "路段參考，建議確認" },
+    { label: "中壢/桃園段", roadLaneCount: 3, confidence: "medium", source: "路段參考，建議確認" },
+    { label: "北桃園/隧道前後", roadLaneCount: 3, confidence: "low", source: "路段參考，隧道與匝道需確認" },
+    { label: "新店端", roadLaneCount: 3, confidence: "low", source: "路段參考，市區銜接需確認" },
+  ],
+  xindian_to_yangmei: [
+    { label: "新店端", roadLaneCount: 3, confidence: "low", source: "路段參考，市區銜接需確認" },
+    { label: "北桃園/隧道前後", roadLaneCount: 3, confidence: "low", source: "路段參考，隧道與匝道需確認" },
+    { label: "桃園/中壢段", roadLaneCount: 3, confidence: "medium", source: "路段參考，建議確認" },
+    { label: "楊梅端", roadLaneCount: 3, confidence: "medium", source: "路段參考，建議確認" },
+  ],
 };
 
 state.trips = normalizeTrips(state.trips);
@@ -1578,6 +1597,10 @@ function handleGuidancePosition(pos) {
       level: "warn",
     });
   } else {
+    const laneCountRef = laneCountReference(direction, segment);
+    const recommendationDetail = laneCountRef
+      ? `${recommendation.detail} 車道數參考：${laneCountRef.text}`
+      : recommendation.detail;
     updateGuidanceView({
       title: "即時建議運作中",
       subtitle: `目前定位精度約 ${Math.round(point.accuracy || 0)} 公尺`,
@@ -1586,7 +1609,7 @@ function handleGuidancePosition(pos) {
       speedLabel: Number.isFinite(speedKmh) ? `${Math.round(speedKmh)} km/h` : "-- km/h",
       confidenceLabel: recommendation.confidenceLabel,
       recommendation: recommendation.title,
-      detail: recommendation.detail,
+      detail: recommendationDetail,
       level: recommendation.level,
     });
     if (!state.trip) updateFloatingRecorder(true, "即時建議中", `${directionLabel}｜${segment.label}｜${recommendation.title}`);
@@ -1635,14 +1658,26 @@ function updateGuidanceView(view) {
   }
 }
 
+function laneCountReference(direction, segment) {
+  if (!direction || !segment) return null;
+  const profile = routeLaneProfiles[direction]?.[segment.index];
+  if (!profile) return null;
+  return {
+    ...profile,
+    text: `${profile.roadLaneCount} 線道（${profile.source}）`,
+  };
+}
+
 async function loadForwardCctv() {
   const point = state.lastGuidancePoint || state.trip?.points?.at?.(-1);
   if (!point) {
     setCctvStatus("尚未取得 GPS 位置；請先啟動即時定位，或開始紀錄後再載入。");
+    updateCctvFacts();
     return;
   }
   if ((point.accuracy || 0) > maxReliableAccuracyMeters) {
     setCctvStatus(`GPS 精度約 ${Math.round(point.accuracy || 0)} 公尺，可能找錯鏡頭；請等定位穩定後再試。`);
+    updateCctvFacts();
     return;
   }
 
@@ -1652,12 +1687,14 @@ async function loadForwardCctv() {
     if (!cctvs.length) {
       setCctvStatus("目前讀不到 CCTV 清單，稍後再試。");
       clearCctvFrame("尚無可用影像");
+      updateCctvFacts();
       return;
     }
     renderNearestCctv(point, inferLiveDirection(point, state.lastGuidancePoint));
   } catch (err) {
     setCctvStatus(`CCTV 讀取失敗：${err.message || "資料源暫時不可用"}`);
     clearCctvFrame("影像資料暫時無法載入");
+    updateCctvFacts();
   }
 }
 
@@ -1691,27 +1728,34 @@ async function fetchCctvList() {
 }
 
 function renderNearestCctv(point, direction) {
-  const selected = selectForwardCctv(point, direction);
+  const result = selectForwardCctv(point, direction);
+  const selected = result.selected;
   if (!selected) {
     clearCctvFrame("附近 1 公里內沒有可用國道影像");
-    setCctvStatus("目前位置附近沒有符合方向的國道 CCTV。");
+    updateCctvFacts();
+    renderCctvCandidates(result.candidates);
+    setCctvStatus("目前位置前方沒有符合方向的國道 CCTV。");
     return;
   }
 
-  const distanceLabel = selected.distance < 1000
-    ? `${Math.round(selected.distance)} m`
-    : `${(selected.distance / 1000).toFixed(1)} km`;
+  const distanceLabel = distanceLabelText(selected.distance);
   const directionText = selected.direction ? `｜${selected.direction}` : "";
   if (els.cctvFrame) {
     els.cctvFrame.innerHTML = `
       <img class="cctv-image" src="${selected.url}" alt="${selected.road} ${selected.mile} CCTV 即時影像">
     `;
   }
-  setCctvStatus(`已載入 ${selected.road}${directionText} ${selected.mile || ""}，距離約 ${distanceLabel}。`);
+  updateCctvFacts({
+    confidence: selected.confidenceLabel,
+    distance: distanceLabel,
+    direction: selected.bearingLabel,
+  });
+  renderCctvCandidates(result.candidates);
+  setCctvStatus(`已載入前方影像：${selected.road}${directionText} ${selected.mile || ""}，距離約 ${distanceLabel}。`);
   if (els.cctvMeta) {
     els.cctvMeta.textContent = selected.section
-      ? `${selected.section}｜資料來源：交通部 TDX 國道 CCTV 開放資料。`
-      : "資料來源：交通部 TDX 國道 CCTV 開放資料。";
+      ? `${selected.section}｜可信度：${selected.confidenceLabel}｜資料來源：交通部 TDX 國道 CCTV 開放資料。`
+      : `可信度：${selected.confidenceLabel}｜資料來源：交通部 TDX 國道 CCTV 開放資料。`;
   }
 }
 
@@ -1722,16 +1766,32 @@ function selectForwardCctv(point, direction) {
       const distance = distanceBetween(point, { lat: camera.lat, lng: camera.lng });
       const bearing = bearingBetween(point, { lat: camera.lat, lng: camera.lng });
       const bearingDelta = Number.isFinite(heading) ? Math.abs(angleDelta(heading, bearing)) : 0;
-      return { ...camera, distance, bearingDelta };
+      const roadDirectionBearing = roadDirectionToBearing(camera.direction);
+      const roadDirectionDelta = Number.isFinite(heading) && Number.isFinite(roadDirectionBearing)
+        ? Math.abs(angleDelta(heading, roadDirectionBearing))
+        : 0;
+      const confidence = cctvConfidenceLevel(distance, bearingDelta, roadDirectionDelta, Number.isFinite(heading));
+      const score = distance + bearingDelta * 8 + roadDirectionDelta * 4 + confidence.penalty;
+      return {
+        ...camera,
+        distance,
+        bearing,
+        bearingDelta,
+        roadDirectionDelta,
+        score,
+        confidenceLevel: confidence.level,
+        confidenceLabel: confidence.label,
+        bearingLabel: Number.isFinite(heading) ? `前方偏 ${Math.round(bearingDelta)}°` : "方向待確認",
+      };
     })
     .filter((camera) => camera.distance <= cctvMaxDistanceMeters)
     .filter((camera) => !Number.isFinite(heading) || camera.bearingDelta <= cctvForwardBearingTolerance);
 
-  return candidates.sort((a, b) => {
-    const scoreA = a.distance + a.bearingDelta * 8;
-    const scoreB = b.distance + b.bearingDelta * 8;
-    return scoreA - scoreB;
-  })[0] || null;
+  const sorted = candidates.sort((a, b) => a.score - b.score).slice(0, 3);
+  return {
+    selected: sorted[0] || null,
+    candidates: sorted,
+  };
 }
 
 function getEffectiveHeading(point, direction) {
@@ -1747,11 +1807,58 @@ function getEffectiveHeading(point, direction) {
 function clearCctv() {
   clearCctvFrame("尚未載入影像");
   setCctvStatus("已清除影像；需要時可重新載入前方 CCTV。");
+  updateCctvFacts();
+  renderCctvCandidates([]);
   if (els.cctvMeta) els.cctvMeta.textContent = "資料來源：交通部 TDX 國道 CCTV 開放資料。影像可能延遲或暫時無法播放。";
 }
 
 function clearCctvFrame(message) {
   if (els.cctvFrame) els.cctvFrame.innerHTML = `<div class="cctv-empty">${message}</div>`;
+}
+
+function updateCctvFacts({ confidence = "--", distance = "--", direction = "--" } = {}) {
+  if (els.cctvConfidence) els.cctvConfidence.textContent = confidence;
+  if (els.cctvDistance) els.cctvDistance.textContent = distance;
+  if (els.cctvDirection) els.cctvDirection.textContent = direction;
+}
+
+function renderCctvCandidates(candidates = []) {
+  if (!els.cctvCandidateList) return;
+  if (!candidates.length) {
+    els.cctvCandidateList.innerHTML = "";
+    return;
+  }
+  els.cctvCandidateList.innerHTML = candidates.map((camera, index) => `
+    <div class="cctv-candidate">
+      <div>
+        <strong>${index === 0 ? "目前採用" : "備選"}｜${camera.road}${camera.direction ? `｜${camera.direction}` : ""} ${camera.mile || ""}</strong>
+        <small>${distanceLabelText(camera.distance)}｜${camera.bearingLabel}｜${camera.section || "路段未標示"}</small>
+      </div>
+      <span class="cctv-score">${camera.confidenceLabel}</span>
+    </div>
+  `).join("");
+}
+
+function cctvConfidenceLevel(distance, bearingDelta, roadDirectionDelta, hasHeading) {
+  if (!hasHeading) return { level: "medium", label: "中", penalty: 120 };
+  if (distance <= 800 && bearingDelta <= 35 && roadDirectionDelta <= 60) return { level: "high", label: "高", penalty: 0 };
+  if (distance <= 1200 && bearingDelta <= 60) return { level: "medium", label: "中", penalty: 80 };
+  return { level: "low", label: "低", penalty: 200 };
+}
+
+function roadDirectionToBearing(direction) {
+  const text = String(direction || "").toUpperCase();
+  if (text.includes("N")) return 0;
+  if (text.includes("E")) return 90;
+  if (text.includes("S")) return 180;
+  if (text.includes("W")) return 270;
+  return NaN;
+}
+
+function distanceLabelText(distance) {
+  return distance < 1000
+    ? `${Math.round(distance)} m`
+    : `${(distance / 1000).toFixed(1)} km`;
 }
 
 function setCctvStatus(message) {
