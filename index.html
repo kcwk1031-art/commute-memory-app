@@ -27,6 +27,7 @@
 
     <section class="mode-switch" aria-label="畫面模式">
       <button class="is-active" id="modeRecord" type="button">紀錄模式</button>
+      <button id="modeDrive" type="button">開車總覽</button>
       <button id="modeGuidance" type="button">即時建議</button>
       <button id="modeDashboard" type="button">分析看板</button>
     </section>
@@ -223,33 +224,59 @@
         <div class="cctv-head">
           <div>
             <h3>前方即時影像</h3>
-            <p id="cctvStatus">啟動即時定位後，可載入前方約 1 公里內的國道 CCTV。</p>
+            <p id="cctvStatus">啟動即時定位後，優先載入前方最近國道 CCTV；若前鏡頭低於 500 公尺，會改抓前方 5 公里內下一支。</p>
           </div>
           <div class="cctv-actions">
             <button class="secondary" id="loadCctv" type="button">載入前方影像</button>
+            <button class="secondary" id="analyzeCctv" type="button">分析車流</button>
             <button class="text-button" id="clearCctv" type="button">清除影像</button>
           </div>
-        </div>
-        <div class="cctv-facts" aria-label="前方影像判斷資訊">
-          <article>
-            <span>可信度</span>
-            <strong id="cctvConfidence">--</strong>
-          </article>
-          <article>
-            <span>距離</span>
-            <strong id="cctvDistance">--</strong>
-          </article>
-          <article>
-            <span>方向</span>
-            <strong id="cctvDirection">--</strong>
-          </article>
         </div>
         <div class="cctv-frame" id="cctvFrame">
           <div class="cctv-empty">尚未載入影像</div>
         </div>
-        <div class="cctv-candidates" id="cctvCandidateList"></div>
+        <div class="cctv-analysis" id="cctvAnalysis">
+          <strong>尚未分析</strong>
+          <span>載入影像後可用目前車道數做低可信車流判斷。</span>
+        </div>
         <div class="cctv-meta" id="cctvMeta">資料來源：交通部 TDX 國道 CCTV 開放資料。影像可能延遲或暫時無法播放。</div>
       </div>
+    </section>
+
+    <section class="drive-assist-view is-hidden" id="driveAssistView" aria-label="開車一頁式總覽">
+      <div class="drive-assist-top">
+        <div>
+          <span>目前建議</span>
+          <strong id="driveAssistRecommendation">先照路況</strong>
+          <small id="driveAssistDetail">啟動定位後會整合 GPS、歷史紀錄、CCTV 與 VD 速度。</small>
+        </div>
+        <div class="drive-assist-alert" id="driveAssistAlert">待命</div>
+      </div>
+
+      <div class="drive-assist-grid">
+        <article>
+          <span>GPS 車速</span>
+          <strong id="driveAssistGpsSpeed">-- km/h</strong>
+        </article>
+        <article>
+          <span>速限參考</span>
+          <strong id="driveAssistSpeedLimit">-- km/h</strong>
+        </article>
+        <article>
+          <span>VD 路段速度</span>
+          <strong id="driveAssistVdSpeed">-- km/h</strong>
+        </article>
+        <article>
+          <span>監視器距離</span>
+          <strong id="driveAssistCctvDistance">--</strong>
+        </article>
+      </div>
+
+      <div class="drive-assist-road" id="driveAssistRoad">尚未取得路段資訊</div>
+      <div class="drive-assist-camera" id="driveAssistCctvFrame">
+        <div class="cctv-empty">尚未載入監視器畫面</div>
+      </div>
+      <div class="drive-assist-lanes" id="driveAssistLaneSpeeds">VD 車道速度尚未載入</div>
     </section>
 
     <section class="history-band record-view">
