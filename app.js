@@ -1,4 +1,4 @@
-﻿const storageKey = "commute-memory-trips-v2";
+const storageKey = "commute-memory-trips-v2";
 const legacyStorageKey = "commute-memory-trips-v1";
 const draftStorageKey = "commute-memory-trip-draft-v1";
 const uploadEndpointKey = "commute-memory-upload-endpoint";
@@ -154,8 +154,8 @@ const state = {
 };
 
 const commuteAnchors = {
-  yangmei: { lat: 24.9186, lng: 121.1458, radiusMeters: 8500, label: "璆???? },
-  xindian: { lat: 24.9676, lng: 121.5414, radiusMeters: 6500, label: "?啣???? },
+  yangmei: { lat: 24.9186, lng: 121.1458, radiusMeters: 8500, label: "楊梅區域" },
+  xindian: { lat: 24.9676, lng: 121.5414, radiusMeters: 6500, label: "新店區域" },
 };
 
 state.trips = normalizeTrips(state.trips);
@@ -187,11 +187,11 @@ function saveTrips() {
     const emergencyTrips = compactTrips.slice(0, 12).map((trip) => compactTripForStorage(trip, 350));
     try {
       localStorage.setItem(storageKey, JSON.stringify(emergencyTrips));
-      setStatus("撌脖?摮移蝪∠???, "??摰寥?銝雲嚗歇靽?頠?霈??璅??頝?, false);
-      setRouteNote("???脣?蝛粹?銝雲嚗甈∪歇?孵?蝎曄陛??撱箄降?菟?敺?箸?銝??);
+      setStatus("已保存精簡紀錄", "手機容量不足，已保留車道變化與抽樣軌跡", false);
+      setRouteNote("手機儲存空間不足，本次已改存精簡版；建議抵達後匯出或上傳。");
     } catch {
-      setStatus("靽?憭望?", "???汗?典摮征??頞喉?隢??臬?瑼?, true);
-      setRouteNote(`靽?憭望?嚗?{err.message || "?汗?典摮征??頞?}`);
+      setStatus("保存失敗", "手機瀏覽器儲存空間不足，請先匯出救援檔", true);
+      setRouteNote(`保存失敗：${err.message || "瀏覽器儲存空間不足"}`);
       throw err;
     }
   }
@@ -217,9 +217,9 @@ function saveTripDraft(force = false) {
         manualState: currentManualState(),
       }));
       state.lastDraftSavedAt = now;
-      setRouteNote("???脣?蝛粹??遛嚗?蝔踹歇?孵?蝎曄陛??);
+      setRouteNote("手機儲存空間偏滿，草稿已改存精簡版。");
     } catch {
-      setRouteNote(`?阮?怠?憭望?嚗?{err.message || "?汗?典摮征??頞?}`);
+      setRouteNote(`草稿暫存失敗：${err.message || "瀏覽器儲存空間不足"}`);
     }
   }
 }
@@ -247,7 +247,7 @@ function showRestoreDraft() {
   const trip = draft.trip;
   const summary = trip.summary || summarizeTrip(trip);
   if (els.restoreText) {
-    els.restoreText.textContent = `銝?頞? ${summary.minutes} ????{summary.km} km??{summary.points} 暺?撠甇?虜蝯??;
+    els.restoreText.textContent = `上一趟約 ${summary.minutes} 分鐘、${summary.km} km、${summary.points} 點，尚未正常結束。`;
   }
   els.restoreBanner?.classList.remove("is-hidden");
 }
@@ -270,7 +270,7 @@ function restoreDraftTrip() {
   els.stopTrip.disabled = false;
   buildManualLaneButtons();
   updateSegmentedState();
-  setStatus("撌脫敺拍???, "GPS 頠楚甇?蝥神", true);
+  setStatus("已恢復紀錄", "GPS 軌跡正在續寫", true);
   updateElapsed();
   updateRecordingOverlay();
   drawRoute();
@@ -354,10 +354,10 @@ function saveUploadEndpoint() {
   state.uploadEndpoint = els.uploadEndpoint.value.trim();
   if (state.uploadEndpoint) {
     localStorage.setItem(uploadEndpointKey, state.uploadEndpoint);
-    setUploadStatus("撌脣摮??喟雯?嚗?敺???蝔??芸?銝??);
+    setUploadStatus("已儲存上傳網址；之後結束行程會自動上傳。");
   } else {
     localStorage.removeItem(uploadEndpointKey);
-    setUploadStatus("撌脫??支??喟雯???);
+    setUploadStatus("已清除上傳網址。");
   }
 }
 
@@ -368,7 +368,7 @@ function toggleAutoMode() {
   }
 
   if (!navigator.geolocation) {
-    setRouteNote("甇斤汗?其??舀摰????);
+    setRouteNote("此瀏覽器不支援定位功能。");
     return;
   }
 
@@ -379,9 +379,9 @@ function toggleAutoMode() {
     timeout: 12000,
   });
 
-  els.autoMode.textContent = "???芸?璅∪?";
-  setStatus("?芸????銝?, "?亥???????蝑?, true);
-  setRouteNote("?芸?璅∪?撌脣????ａ?璆???蒂敺?啣??孵?蝘餃????芸???蝝??);
+  els.autoMode.textContent = "關閉自動模式";
+  setStatus("自動監看中", "接近通勤情境會自動開筆", true);
+  setRouteNote("自動模式已啟動：離開楊梅區域並往新店方向移動時會自動開始紀錄。");
   updateRecordingOverlay();
 }
 
@@ -390,10 +390,10 @@ function stopAutoMode() {
   state.autoWatchId = null;
   state.autoMode = false;
   state.lastAutoPoint = null;
-  els.autoMode.textContent = "???芸?璅∪?";
+  els.autoMode.textContent = "啟動自動模式";
 
-  if (!state.trip) setStatus("撠蝝??, "蝑???摰?", false);
-  setRouteNote("?芸?璅∪?撌脤???);
+  if (!state.trip) setStatus("尚未紀錄", "等待啟動定位", false);
+  setRouteNote("自動模式已關閉。");
   updateRecordingOverlay();
 }
 
@@ -425,7 +425,7 @@ function handleAutoPosition(pos) {
       startTrip({ source: "auto", direction: "xindian_to_yangmei", targetAnchor: "yangmei" });
       handlePosition(pos);
     } else {
-      setRouteNote(`?芸????銝哨?頝?璇? ${(distanceFromYangmei / 1000).toFixed(1)} ?祇?嚗??啣?蝝?${(distanceFromXindian / 1000).toFixed(1)} ?祇??);
+      setRouteNote(`自動監看中：距楊梅約 ${(distanceFromYangmei / 1000).toFixed(1)} 公里，距新店約 ${(distanceFromXindian / 1000).toFixed(1)} 公里。`);
     }
   } else {
     handlePosition(pos);
@@ -464,7 +464,7 @@ function shouldAutoStop(point, kmh) {
 
 function startTrip(options = {}) {
   if (!navigator.geolocation) {
-    setRouteNote("甇斤汗?其??舀摰????);
+    setRouteNote("此瀏覽器不支援定位功能。");
     return;
   }
 
@@ -485,7 +485,7 @@ function startTrip(options = {}) {
   saveTripDraft(true);
   els.startTrip.disabled = true;
   els.stopTrip.disabled = false;
-  setStatus("蝝?葉", options.source === "auto" ? "?芸?璅∪?撌脤?蝑? : "GPS 頠楚甇?撖怠", true);
+  setStatus("紀錄中", options.source === "auto" ? "自動模式已開筆" : "GPS 軌跡正在寫入", true);
   updateElapsed();
 
   if (options.source !== "auto") {
@@ -496,8 +496,8 @@ function startTrip(options = {}) {
         timeout: 12000,
       });
     } catch (err) {
-      setRouteNote(`摰???憭望?嚗??阮撌脣遣蝡?${err.message}`);
-      setStatus("摰??芸???, "?舐?敺?閰佗??桀??阮撌脖???, true);
+      setRouteNote(`定位啟動失敗，但草稿已建立：${err.message}`);
+      setStatus("定位未啟動", "可稍後重試；目前草稿已保留", true);
     }
   }
 
@@ -524,14 +524,14 @@ function stopTrip(source = "manual") {
     saveTripDraft(true);
     els.startTrip.disabled = false;
     els.stopTrip.disabled = false;
-    setStatus("撠靽?", "???脣?蝛粹?銝雲嚗?蝔蹂?靽?嚗?????臬", true);
+    setStatus("尚未保存", "手機儲存空間不足，草稿仍保留，請先按救援匯出", true);
     renderHistory();
     drawRoute(true);
     updateRecordingOverlay();
     return;
   }
   if (state.uploadEndpoint) {
-    void uploadTrip(finishedTrip, "蝯?敺????);
+    void uploadTrip(finishedTrip, "結束後自動上傳");
   }
   clearTripDraft();
 
@@ -544,9 +544,9 @@ function stopTrip(source = "manual") {
   els.stopTrip.disabled = false;
 
   if (state.autoMode && source === "auto") {
-    setStatus("?芸????銝?, "銝?頞歇靽?嚗?敺?銝頞?, true);
+    setStatus("自動監看中", "上一趟已保存，等待下一趟", true);
   } else {
-    setStatus("撌脣?????, "撌脖?摮?祆?甇瑕鞈?", false);
+    setStatus("已完成紀錄", "已保存到本機歷史資料", false);
   }
   renderHistory();
   drawRoute();
@@ -641,14 +641,14 @@ function movementStatus(kmh) {
 }
 
 function handleGeoError(err) {
-  setRouteNote(`摰??⊥???嚗?{err.message}`);
+  setRouteNote(`定位無法啟動：${err.message}`);
   els.startTrip.disabled = Boolean(state.trip);
   els.stopTrip.disabled = false;
   if (state.trip) {
     saveTripDraft(true);
-    setStatus("摰??急?憭望?", "?阮撌脖????舐???摮??", true);
+    setStatus("定位暫時失敗", "草稿已保留，可結束保存或救援", true);
   } else {
-    setStatus("摰?憭望?", "隢Ⅱ隤汗?典?雿???, false);
+    setStatus("定位失敗", "請確認瀏覽器定位權限", false);
   }
 }
 
@@ -659,7 +659,7 @@ async function toggleCamera() {
   }
 
   if (!navigator.mediaDevices?.getUserMedia) {
-    els.laneReason.textContent = "甇斤汗?其??舀?豢?甈???;
+    els.laneReason.textContent = "此瀏覽器不支援相機權限。";
     return;
   }
 
@@ -683,13 +683,13 @@ async function startCamera() {
     els.cameraFeed.srcObject = state.cameraStream;
     await els.cameraFeed.play();
     els.cameraEmpty.style.display = "none";
-    els.cameraToggle.textContent = "???豢?撖阡?";
+    els.cameraToggle.textContent = "關閉相機實驗";
     await refreshCameraDevices();
     setupZoomControl();
     analyzeLaneFrame();
   } catch (err) {
-    els.laneResult.textContent = "?豢??芸???;
-    els.laneReason.textContent = `隢Ⅱ隤璈???${err.message}`;
+    els.laneResult.textContent = "相機未啟動";
+    els.laneReason.textContent = `請確認相機權限：${err.message}`;
   }
 }
 
@@ -702,9 +702,9 @@ function stopCamera() {
   els.cameraFeed.srcObject = null;
   els.cameraToggle.closest(".lane-panel")?.classList.remove("camera-active");
   els.cameraEmpty.style.display = "grid";
-  els.cameraToggle.textContent = "?豢?撖阡??";
-  els.laneResult.textContent = getEffectiveLane()?.label || "撠鞈?";
-  els.laneConfidence.textContent = "靽∪?摨?--";
+  els.cameraToggle.textContent = "相機實驗功能";
+  els.laneResult.textContent = getEffectiveLane()?.label || "尚無資料";
+  els.laneConfidence.textContent = "信心度 --";
   els.zoomControl.classList.add("is-hidden");
   updateRecordingOverlay();
 }
@@ -715,11 +715,11 @@ async function refreshCameraDevices() {
   const currentTrack = state.cameraStream?.getVideoTracks()[0];
   const currentDeviceId = currentTrack?.getSettings?.().deviceId || state.selectedDeviceId;
 
-  els.cameraSelect.innerHTML = `<option value="">?芸?敺??/option>`;
+  els.cameraSelect.innerHTML = `<option value="">自動後鏡頭</option>`;
   state.cameraDevices.forEach((device, index) => {
     const option = document.createElement("option");
     option.value = device.deviceId;
-    option.textContent = device.label || `?⊿ ${index + 1}`;
+    option.textContent = device.label || `鏡頭 ${index + 1}`;
     if (device.deviceId === currentDeviceId) option.selected = true;
     els.cameraSelect.appendChild(option);
   });
@@ -747,7 +747,7 @@ async function applyZoom() {
   try {
     await track.applyConstraints({ advanced: [{ zoom: Number(els.zoomSlider.value) }] });
   } catch {
-    els.laneReason.textContent = "甇日?凋??舀?汗?函葬?暹?塚??舀?詨隞?准?;
+    els.laneReason.textContent = "此鏡頭不支援瀏覽器縮放控制，可改選其他鏡頭。";
   }
 }
 
@@ -851,11 +851,11 @@ function detectLanePosition(image, width, height) {
   const symmetryPenalty = left && right ? Math.min(16, Math.abs(offset) * 24) : 8;
   const confidence = Math.max(0, Math.min(92, Math.round(pairedBonus + peakBonus - symmetryPenalty)));
   const valid = confidence >= minVisionConfidence;
-  let lane = "敶勗?靽∪?銝雲";
+  let lane = "影像信心不足";
   if (valid) {
-    lane = "銝剔????葉憭?;
-    if (offset > .18) lane = "??蝺??喳頠?";
-    if (offset < -.18) lane = "?蝺?撌血頠?";
+    lane = "中線或車道中央";
+    if (offset > .18) lane = "偏外線／右側車道";
+    if (offset < -.18) lane = "偏內線／左側車道";
   }
 
   return {
@@ -915,14 +915,14 @@ function setLaneResult(result) {
 
   const effective = getEffectiveLane();
   els.laneResult.textContent = effective?.label || result.lane;
-  els.laneConfidence.textContent = `靽∪?摨?${result.confidence}%`;
+  els.laneConfidence.textContent = `信心度 ${result.confidence}%`;
 
   if (state.currentLaneIndex) {
-    els.laneReason.textContent = `?桀?隞交????皞?敶勗??芸?頛?閬???${result.visibleLineCount}嚗蔣?縑敹?${result.confidence}%?;
+    els.laneReason.textContent = `目前以手動車道為準；影像只做輔助。可見線數 ${result.visibleLineCount}，影像信心 ${result.confidence}%。`;
   } else if (result.valid) {
-    els.laneReason.textContent = `敶勗??菜葫?舐嚗閬???${result.visibleLineCount}?;
+    els.laneReason.textContent = `影像偵測可用；可見線數 ${result.visibleLineCount}。`;
   } else {
-    els.laneReason.textContent = `敶勗?靽∪?銝雲嚗撖怠??頠??遣霅唳?⊿?矽蝮格嚗??冽??????;
+    els.laneReason.textContent = `影像信心不足，未寫入有效車道。建議改鏡頭、調縮放，或用手動車道按鈕。`;
   }
 }
 
@@ -942,7 +942,7 @@ function setManualLane(index) {
   const effective = getEffectiveLane();
   if (effective) {
     els.laneResult.textContent = effective.label;
-    els.laneReason.textContent = "撌脣???????閮?敺? GPS 暺?銝雿萎?摮?;
+    els.laneReason.textContent = "已切換手動車道標記，後續 GPS 點會一併保存。";
   }
   saveTripDraft(true);
 }
@@ -991,26 +991,26 @@ function getEffectiveLane() {
 }
 
 function manualLaneLabel(index, count) {
-  if (!index) return "?芣?閮?;
-  const side = index === 1 ? "?批" : index === count ? "憭" : "銝剝?";
-  return `蝚?${index}/${count} 頠?嚗?{side}嚗;
+  if (!index) return "未標記";
+  const side = index === 1 ? "內側" : index === count ? "外側" : "中間";
+  return `第 ${index}/${count} 車道（${side}）`;
 }
 
 function flowLabel(flow) {
   return {
-    left_faster: "撌衣?頛翰",
-    same: "撌桐?憭?,
-    right_faster: "?喟?頛翰",
+    left_faster: "左線較快",
+    same: "差不多",
+    right_faster: "右線較快",
   }[flow] || "";
 }
 
 function sourceLabel(source) {
   return {
-    manual: "??",
-    vision: "敶勗?",
-    history: "甇瑕",
-    system: "蝟餌絞",
-  }[source] || "鞈?";
+    manual: "手動鎖定",
+    history: "歷史統計",
+    vision: "相機推估",
+    system: "系統判斷",
+  }[source] || "系統判斷";
 }
 
 function recordEvent(type, value) {
@@ -1028,7 +1028,7 @@ function buildLaneCountButtons() {
   [2, 3, 4, 5, 6].forEach((count) => {
     const button = document.createElement("button");
     button.type = "button";
-    button.textContent = `${count} 蝺;
+    button.textContent = `${count} 線`;
     button.dataset.laneCount = String(count);
     button.addEventListener("click", () => setRoadLaneCount(count));
     els.laneCountButtons.appendChild(button);
@@ -1049,10 +1049,10 @@ function buildManualLaneButtons() {
 }
 
 function laneButtonLabel(index, count) {
-  if (index === 1) return "??;
-  if (index === count) return "憭?;
-  if (count === 3) return "銝?;
-  return `銝?{index - 1}`;
+  if (index === 1) return "內";
+  if (index === count) return "外";
+  if (count === 3) return "中";
+  return `中${index - 1}`;
 }
 
 function updateSegmentedState() {
@@ -1073,8 +1073,8 @@ function updateMetrics(point) {
   els.speed.textContent = Number.isFinite(speedKmh) ? `${speedKmh.toFixed(0)} km/h` : "-- km/h";
   els.distance.textContent = `${(state.trip.distanceMeters / 1000).toFixed(1)} km`;
   els.pointCount.textContent = String(state.trip.points.length);
-  const laneText = point.effectiveLane ? `嚗????${point.effectiveLane.label}` : "";
-  setRouteNote(`?餈?雿移摨衣? ${Math.round(point.accuracy)} ?砍偕${laneText}`);
+  const laneText = point.effectiveLane ? `；目前車道：${point.effectiveLane.label}` : "";
+  setRouteNote(`最近定位精度約 ${Math.round(point.accuracy)} 公尺${laneText}`);
   updateDriveConsole();
 }
 
@@ -1090,10 +1090,10 @@ function updateElapsed() {
 function updateRecordingOverlay() {
   if (!state.trip) {
     if (els.recordingOverlay) {
-      els.recordingOverlay.textContent = "撠蝝??;
+      els.recordingOverlay.textContent = "尚未紀錄";
       els.recordingOverlay.classList.remove("is-recording");
     }
-    updateFloatingRecorder(false, "?芰???, state.autoMode ? "?芸?璅∪?敺" : "GPS 敺");
+    updateFloatingRecorder(false, "未紀錄", state.autoMode ? "自動模式待命" : "GPS 待命");
     updateDriveConsole();
     return;
   }
@@ -1103,13 +1103,13 @@ function updateRecordingOverlay() {
   const sec = String(seconds % 60).padStart(2, "0");
   const km = (state.trip.distanceMeters / 1000).toFixed(1);
   const points = state.trip.points.length;
-  const lane = getEffectiveLane()?.label || "頠??芣?閮?;
-  const detail = `${min}:${sec}嚚?{km} km嚚?{points} 暺?${lane}`;
+  const lane = getEffectiveLane()?.label || "車道未標記";
+  const detail = `${min}:${sec}｜${km} km｜${points} 點｜${lane}`;
   if (els.recordingOverlay) {
-    els.recordingOverlay.textContent = `蝝?葉 ${detail}`;
+    els.recordingOverlay.textContent = `紀錄中 ${detail}`;
     els.recordingOverlay.classList.add("is-recording");
   }
-  updateFloatingRecorder(true, "蝝?葉", detail);
+  updateFloatingRecorder(true, "紀錄中", detail);
   updateDriveConsole();
 }
 
@@ -1117,10 +1117,10 @@ function updateDriveConsole() {
   if (!els.driveStatusMain) return;
 
   if (!state.trip) {
-    els.driveStatusMain.textContent = state.autoMode ? "?芸?敺" : "敺";
-    els.driveStatusDetail.textContent = state.autoMode ? "?亥??韏琿?敺??芸???" : "????敺?靽? GPS ??????;
-    els.driveLaneMain.textContent = "?芣?閮?;
-    els.driveLaneDetail.textContent = "?舐銝????璅??改?銝哨?憭?";
+    els.driveStatusMain.textContent = state.autoMode ? "自動待命" : "待命";
+    els.driveStatusDetail.textContent = state.autoMode ? "接近通勤起點後會自動開始" : "按下開始後會保存 GPS 與車道紀錄";
+    els.driveLaneMain.textContent = "未標記";
+    els.driveLaneDetail.textContent = "可用下方按鈕手動標記內／中／外線";
     els.driveTime.textContent = "00:00";
     els.driveKm.textContent = "0.0 km";
     els.drivePoints.textContent = "0";
@@ -1132,14 +1132,14 @@ function updateDriveConsole() {
   const sec = String(seconds % 60).padStart(2, "0");
   const lane = getEffectiveLane();
   const lastPoint = state.trip.points.at(-1);
-  els.driveStatusMain.textContent = "蝝?葉";
+  els.driveStatusMain.textContent = "紀錄中";
   els.driveStatusDetail.textContent = lastPoint
-    ? `?餈?雿移摨衣? ${Math.round(lastPoint.accuracy || 0)} ?砍偕`
-    : "蝑?蝚砌???GPS 摰?暺?;
-  els.driveLaneMain.textContent = lane?.label || "?芣?閮?;
+    ? `最近定位精度約 ${Math.round(lastPoint.accuracy || 0)} 公尺`
+    : "等待第一個 GPS 定位點";
+  els.driveLaneMain.textContent = lane?.label || "未標記";
   els.driveLaneDetail.textContent = lane
-    ? `${sourceLabel(lane.source)}嚚?{state.roadLaneCount} 蝺?`
-    : "撱箄降??璅?嚗?璈?靽∪?隤文";
+    ? `${sourceLabel(lane.source)}｜${state.roadLaneCount} 線道`
+    : "建議手動標記，避免相機低信心誤判";
   els.driveTime.textContent = `${min}:${sec}`;
   els.driveKm.textContent = `${(state.trip.distanceMeters / 1000).toFixed(1)} km`;
   els.drivePoints.textContent = String(state.trip.points.length);
@@ -1306,7 +1306,7 @@ function summarizeTrip(trip) {
     acc[sample.lane] = (acc[sample.lane] || 0) + (sample.count || 1);
     return acc;
   }, {});
-  const mainLane = Object.entries(laneCounts).sort((a, b) => b[1] - a[1])[0]?.[0] || "?⊥???????;
+  const mainLane = Object.entries(laneCounts).sort((a, b) => b[1] - a[1])[0]?.[0] || "無有效車道資料";
   const manualSamples = (trip.laneSamples || [])
     .filter((sample) => sample.source === "manual")
     .reduce((sum, sample) => sum + (sample.count || 1), 0);
@@ -1329,7 +1329,7 @@ function summarizeTrip(trip) {
 
 function renderHistory() {
   if (!state.trips.length) {
-    els.historyList.innerHTML = `<div class="empty-history">?桀?瘝?甇瑕鞈????洵銝頞??＊蝷箏?ㄐ??/div>`;
+    els.historyList.innerHTML = `<div class="empty-history">目前沒有歷史資料。完成第一趟後會顯示在這裡。</div>`;
     renderDashboard();
     return;
   }
@@ -1340,8 +1340,8 @@ function renderHistory() {
     return `
       <div class="history-row">
         <strong>${formatDate(started)}</strong>
-        <span>${summary.minutes} ??</span>
-        <span>${summary.km} ?祇?</span>
+        <span>${summary.minutes} 分鐘</span>
+        <span>${summary.km} 公里</span>
         <span>${summary.mainLane}</span>
       </div>
     `;
@@ -1372,14 +1372,14 @@ function renderDashboard() {
   const model = buildDashboardModel(normalizeTrips(state.trips));
   els.dashboardVerdict.textContent = model.verdict;
   els.dashboardSummary.innerHTML = [
-    dashboardCard("??頞", `${model.totalTrips} 頞),
-    dashboardCard("頠?璅?", `${model.totalLaneSamples.toLocaleString("zh-TW")} 蝑),
-    dashboardCard("撱箄降???, model.readyDirections >= 1 ? "?臬??隅?? : "?敞蝛???),
-    dashboardCard("?日鞈?", `${model.totalPoints.toLocaleString("zh-TW")} GPS 暺),
+    dashboardCard("有效趟數", `${model.totalTrips} 趟`),
+    dashboardCard("車道樣本", `${model.totalLaneSamples.toLocaleString("zh-TW")} 筆`),
+    dashboardCard("建議狀態", model.readyDirections >= 1 ? "可參考趨勢" : "先累積資料"),
+    dashboardCard("除錯資料", `${model.totalPoints.toLocaleString("zh-TW")} GPS 點`),
   ].join("");
 
   if (!model.totalTrips) {
-    els.dashboardDirections.innerHTML = `<div class="direction-card"><h3>撠鞈?</h3><div class="recommendation">摰?銝虫?摮洵銝頞?嚗ㄐ??憪?????頠?頞典??/div></div>`;
+    els.dashboardDirections.innerHTML = `<div class="direction-card"><h3>尚無資料</h3><div class="recommendation">完成並保存第一趟後，這裡會開始整理方向、時間與車道趨勢。</div></div>`;
     return;
   }
 
@@ -1387,7 +1387,7 @@ function renderDashboard() {
     <article class="direction-card">
       <div>
         <span>${direction.label}</span>
-        <h3>${direction.tripCount} 頞?撟喳? ${direction.avgMinutes} ??${direction.avgKm} km</h3>
+        <h3>${direction.tripCount} 趟｜平均 ${direction.avgMinutes} 分｜${direction.avgKm} km</h3>
       </div>
       <div class="recommendation">
         <strong>${direction.recommendationTitle}</strong><br>
@@ -1419,17 +1419,17 @@ function confidenceContract({ level, source, samples = 0, tripCount = 0, visionS
         ? "low"
         : "insufficient";
   const sourceLabel = {
-    manual: "????",
-    history: "甇瑕蝯梯?",
-    vision: "?豢??其摯",
-    system: "蝟餌絞?斗",
-  }[source] || "蝟餌絞?斗";
+    manual: "手動鎖定",
+    history: "歷史統計",
+    vision: "相機推估",
+    system: "系統判斷",
+  }[source] || "系統判斷";
   const levelLabel = {
-    insufficient: "鞈?銝雲",
-    low: "雿靽?,
-    medium: "銝剖靽?,
-    high: "擃靽?,
-    manual: "??蝣箄?",
+    insufficient: "資料不足",
+    low: "低可信",
+    medium: "中可信",
+    high: "高可信",
+    manual: "手動確認",
   }[normalizedLevel];
 
   return {
@@ -1440,7 +1440,7 @@ function confidenceContract({ level, source, samples = 0, tripCount = 0, visionS
     samples,
     tripCount,
     visionShare,
-    text: `${levelLabel}嚚?{sourceLabel}`,
+    text: `${levelLabel}｜${sourceLabel}`,
   };
 }
 
@@ -1449,8 +1449,8 @@ function recommendLaneForSegmentV2(direction, segmentIndex) {
   if (currentLane?.source === "manual") {
     const confidence = confidenceContract({ level: "manual", source: "manual", samples: 1 });
     return {
-      title: `?? ${currentLane.label}`,
-      detail: "?雿銝???閮?頠?嚗?甇瑕蝯梯??璈隡啜?,
+      title: `鎖定 ${currentLane.label}`,
+      detail: "這是你當下手動標記的車道，優先於歷史統計與相機推估。",
       confidenceLabel: confidence.text,
       confidence,
       level: confidence.level,
@@ -1490,8 +1490,8 @@ function recommendLaneForSegmentV2(direction, segmentIndex) {
   if (!topLane || tripIds.size < 2 || samples < 40) {
     const confidence = confidenceContract({ level: "insufficient", source: "history", samples, tripCount: tripIds.size });
     return {
-      title: "?頝舀?",
-      detail: `???頝舀挾?桀??芣? ${tripIds.size} 頞?{samples} 蝑?刻?????銝＊蝷箸摰????踹?隤文??,
+      title: "先照路況",
+      detail: `同方向同路段目前只有 ${tripIds.size} 趟、${samples} 筆可用車道資料；不顯示暫定車道，避免誤導。`,
       confidenceLabel: confidence.text,
       confidence,
       level: confidence.level,
@@ -1511,11 +1511,11 @@ function recommendLaneForSegmentV2(direction, segmentIndex) {
     visionShare,
   });
   const avgSpeed = speedCount ? Math.round(speedTotal / speedCount) : null;
-  const titlePrefix = level === "high" || level === "medium" ? "?? : "閫撖";
+  const titlePrefix = level === "high" || level === "medium" ? "參考" : "觀察到";
   const detailParts = [
-    `靘?${tripIds.size} 頞?{samples} 蝑?頝舀挾鞈?蝯梯??,
-    avgSpeed ? `??撟喳??漲蝝?${avgSpeed} km/h? : "",
-    level === "low" ? "?臭縑摨虫?雿?隢?閬??內霈?頠??? : "?臭??箏??孵??楝畾萄???,
+    `依 ${tripIds.size} 趟、${samples} 筆同路段資料統計。`,
+    avgSpeed ? `有效平均速度約 ${avgSpeed} km/h。` : "",
+    level === "low" ? "可信度仍低，請不要只因本提示變換車道。" : "可作為同方向同路段參考。",
   ].filter(Boolean);
 
   return {
@@ -1535,14 +1535,14 @@ function toggleGuidance() {
 
   if (!navigator.geolocation) {
     updateGuidanceView({
-      title: "甇斤汗?其??舀摰?",
-      subtitle: "隢??Safari ??Chrome ??嚗蒂?迂摰?甈???,
+      title: "此瀏覽器不支援定位",
+      subtitle: "請改用 Safari 或 Chrome 開啟，並允許定位權限。",
       directionLabel: "--",
       segmentLabel: "--",
       speedLabel: "-- km/h",
       confidenceLabel: "--",
-      recommendation: "?⊥???",
-      detail: "?桀??蹂???GPS 摰????,
+      recommendation: "無法啟動",
+      detail: "目前拿不到 GPS 定位功能。",
       level: "warn",
     });
     return;
@@ -1550,16 +1550,16 @@ function toggleGuidance() {
 
   state.guidanceActive = true;
   state.lastGuidancePoint = null;
-  els.guidanceToggle.textContent = "?迫?單?摰?";
+  els.guidanceToggle.textContent = "停止即時定位";
   updateGuidanceView({
-    title: "甇?摰?銝?,
-    subtitle: "隢??迨????蝟餌絞?? GPS ?湔?單?撱箄降??,
-    directionLabel: "?斗銝?,
-    segmentLabel: "?斗銝?,
+    title: "正在定位中",
+    subtitle: "請保持此頁開啟，系統會依 GPS 更新即時建議。",
+    directionLabel: "判斷中",
+    segmentLabel: "判斷中",
     speedLabel: "-- km/h",
     confidenceLabel: "--",
-    recommendation: "摰?銝?,
-    detail: "??蝚砌?蝑?GPS 敺????斗?孵??楝畾萸?,
+    recommendation: "定位中",
+    detail: "取得第一筆 GPS 後會開始判斷方向與路段。",
     level: "warn",
   });
 
@@ -1568,7 +1568,7 @@ function toggleGuidance() {
     maximumAge: 1000,
     timeout: 12000,
   });
-  if (!state.trip) updateFloatingRecorder(true, "?單?撱箄降銝?, "GPS 摰???");
+  if (!state.trip) updateFloatingRecorder(true, "即時建議中", "GPS 定位啟動");
 }
 
 function stopGuidance() {
@@ -1576,19 +1576,19 @@ function stopGuidance() {
   state.guidanceWatchId = null;
   state.lastGuidancePoint = null;
   state.guidanceActive = false;
-  if (els.guidanceToggle) els.guidanceToggle.textContent = "???單?摰?";
+  if (els.guidanceToggle) els.guidanceToggle.textContent = "啟動即時定位";
   updateGuidanceView({
-    title: "?單?撱箄降撌脣?甇?,
-    subtitle: "?活??敺??靘?GPS ?斗?桀?頝舀挾??,
+    title: "即時建議已停止",
+    subtitle: "再次啟動後會重新依 GPS 判斷目前路段。",
     directionLabel: "--",
     segmentLabel: "--",
     speedLabel: "-- km/h",
     confidenceLabel: "--",
-    recommendation: "撠??",
-    detail: "??敺??斗?孵??楝畾菔?撱箄降頠???,
+    recommendation: "尚未啟動",
+    detail: "啟動後會判斷方向、路段與建議車道。",
     level: "",
   });
-  if (!state.trip) updateFloatingRecorder(false, "敺", state.autoMode ? "?芸?璅∪?敺" : "GPS 敺");
+  if (!state.trip) updateFloatingRecorder(false, "待命", state.autoMode ? "自動模式待命" : "GPS 待命");
 }
 
 function handleGuidancePosition(pos) {
@@ -1605,32 +1605,32 @@ function handleGuidancePosition(pos) {
 
   if ((point.accuracy || 0) > maxReliableAccuracyMeters) {
     updateGuidanceView({
-      title: "GPS 蝎曉漲銝雲",
-      subtitle: `?桀?摰?蝎曉漲蝝?${Math.round(point.accuracy || 0)} ?砍偕嚗??怠?撱箄降?,
-      directionLabel: directionLabel || "?斗銝?,
+      title: "GPS 精度不足",
+      subtitle: `目前定位精度約 ${Math.round(point.accuracy || 0)} 公尺，先暫停建議。`,
+      directionLabel: directionLabel || "判斷中",
       segmentLabel: segment?.label || "--",
       speedLabel: Number.isFinite(speedKmh) ? `${Math.round(speedKmh)} km/h` : "-- km/h",
-      confidenceLabel: "鞈?銝雲",
-      recommendation: "?頝舀?",
-      detail: "摰?隤文榆憭芸之?捆???舀??頝舀挾嚗銝?靘??遣霅啜?,
+      confidenceLabel: "資料不足",
+      recommendation: "先照路況",
+      detail: "定位誤差太大時容易抓錯方向與路段，暫不提供車道建議。",
       level: "warn",
     });
   } else if (!direction || !segment) {
     updateGuidanceView({
-      title: "甇??斗?孵?",
-      subtitle: "頠?蝘餃?銝撠挾敺??孵??皞?,
-      directionLabel: directionLabel || "?斗銝?,
+      title: "正在判斷方向",
+      subtitle: "車輛移動一小段後，方向會更準。",
+      directionLabel: directionLabel || "判斷中",
       segmentLabel: "--",
       speedLabel: Number.isFinite(speedKmh) ? `${Math.round(speedKmh)} km/h` : "-- km/h",
-      confidenceLabel: "雿?,
-      recommendation: "?頝舀?",
-      detail: "?桀? GPS 撠?頞喃誑?斗雿?冽?璇??啣?嚗??啣?敺璆???,
+      confidenceLabel: "低",
+      recommendation: "先照路況",
+      detail: "目前 GPS 尚不足以判斷你是在楊梅往新店，或新店往楊梅。",
       level: "warn",
     });
   } else {
     updateGuidanceView({
-      title: "?單?撱箄降??銝?,
-      subtitle: `?桀?摰?蝎曉漲蝝?${Math.round(point.accuracy || 0)} ?砍偕`,
+      title: "即時建議運作中",
+      subtitle: `目前定位精度約 ${Math.round(point.accuracy || 0)} 公尺`,
       directionLabel,
       segmentLabel: segment.label,
       speedLabel: Number.isFinite(speedKmh) ? `${Math.round(speedKmh)} km/h` : "-- km/h",
@@ -1639,7 +1639,7 @@ function handleGuidancePosition(pos) {
       detail: recommendation.detail,
       level: recommendation.level,
     });
-    if (!state.trip) updateFloatingRecorder(true, "?單?撱箄降銝?, `${directionLabel}嚚?{segment.label}嚚?{recommendation.title}`);
+    if (!state.trip) updateFloatingRecorder(true, "即時建議中", `${directionLabel}｜${segment.label}｜${recommendation.title}`);
   }
 
   state.lastGuidancePoint = point;
@@ -1653,14 +1653,14 @@ function handleGuidancePosition(pos) {
 
 function handleGuidanceError(error) {
   updateGuidanceView({
-    title: "摰?憭望?",
-    subtitle: "隢Ⅱ隤?璈汗?典歇?迂摰?嚗??靽?????,
+    title: "定位失敗",
+    subtitle: "請確認手機瀏覽器已允許定位，且頁面保持開啟。",
     directionLabel: "--",
     segmentLabel: "--",
     speedLabel: "-- km/h",
     confidenceLabel: "--",
-    recommendation: "?⊥?撱箄降",
-    detail: error?.message || "?桀??⊥??? GPS??,
+    recommendation: "無法建議",
+    detail: error?.message || "目前無法取得 GPS。",
     level: "warn",
   });
 }
@@ -1690,27 +1690,27 @@ function updateGuidanceView(view) {
 async function loadForwardCctv() {
   const point = state.lastGuidancePoint || state.trip?.points?.at?.(-1);
   if (!point) {
-    setCctvStatus("撠?? GPS 雿蔭嚗??????雿???憪??????乓?);
+    setCctvStatus("尚未取得 GPS 位置；請先啟動即時定位，或開始紀錄後再載入。");
     return;
   }
   if ((point.accuracy || 0) > maxReliableAccuracyMeters) {
-    setCctvStatus(`GPS 蝎曉漲蝝?${Math.round(point.accuracy || 0)} ?砍偕嚗?賣?舫?哨?隢?摰?蝛拙?敺?閰艾);
+    setCctvStatus(`GPS 精度約 ${Math.round(point.accuracy || 0)} 公尺，可能找錯鏡頭；請等定位穩定後再試。`);
     return;
   }
 
   try {
-    setCctvStatus("甇?霈????CCTV 皜...");
+    setCctvStatus("正在讀取國道 CCTV 清單...");
     const cctvs = await fetchCctvList();
     if (!cctvs.length) {
-      setCctvStatus("?桀?霈銝 CCTV 皜嚗?敺?閰艾?);
-      clearCctvFrame("撠?舐敶勗?");
+      setCctvStatus("目前讀不到 CCTV 清單，稍後再試。");
+      clearCctvFrame("尚無可用影像");
       return;
     }
     renderNearestCctv(point, inferLiveDirection(point, state.lastGuidancePoint));
     void refreshDriveAssist(point, inferLiveDirection(point, state.lastGuidancePoint));
   } catch (err) {
-    setCctvStatus(`CCTV 霈?仃??${err.message || "鞈?皞???舐"}`);
-    clearCctvFrame("敶勗?鞈??急??⊥?頛");
+    setCctvStatus(`CCTV 讀取失敗：${err.message || "資料源暫時不可用"}`);
+    clearCctvFrame("影像資料暫時無法載入");
   }
 }
 
@@ -1731,9 +1731,9 @@ async function fetchCctvList() {
         url: extractCctvUrl(camera),
         lat: Number(camera.PositionLat),
         lng: Number(camera.PositionLon),
-        road: camera.RoadName || camera.RoadID || "??",
+        road: camera.RoadName || camera.RoadID || "國道",
         direction: camera.RoadDirection || "",
-        section: `${camera.RoadSection?.Start || ""}${camera.RoadSection?.End ? ` ??${camera.RoadSection.End}` : ""}`.trim(),
+        section: `${camera.RoadSection?.Start || ""}${camera.RoadSection?.End ? ` → ${camera.RoadSection.End}` : ""}`.trim(),
         mile: camera.LocationMile || "",
       }));
     state.cctvLoadedAt = now;
@@ -1744,38 +1744,27 @@ async function fetchCctvList() {
 }
 
 function extractCctvUrl(camera) {
-  const directFields = [
-    camera.VideoStreamURL,
-    camera.VideoImageURL,
-    camera.ImageURL,
-    camera.SnapshotURL,
-    camera.LiveStreamURL,
-    camera.VideoURL,
-    camera.CCTVURL,
-    camera.CctvURL,
-    camera.Url,
-    camera.URL,
-    camera.MediaURL,
+  const directKeys = [
+    "VideoStreamURL",
+    "VideoImageURL",
+    "ImageURL",
+    "SnapshotURL",
+    "LiveStreamURL",
+    "VideoURL",
+    "CCTVURL",
+    "CctvURL",
+    "Url",
+    "URL",
+    "MediaURL",
   ];
-  const directMatch = directFields.find((value) => typeof value === "string" && /^https?:\/\//i.test(value));
-  if (directMatch) return directMatch;
-
-  const nestedStreams = Array.isArray(camera.VideoStreams) ? camera.VideoStreams
-    : Array.isArray(camera.Streams) ? camera.Streams
-      : Array.isArray(camera.Media) ? camera.Media
-        : [];
-
-  for (const stream of nestedStreams) {
-    const nestedMatch = [
-      stream?.url,
-      stream?.URL,
-      stream?.VideoStreamURL,
-      stream?.ImageURL,
-      stream?.SnapshotURL,
-    ].find((value) => typeof value === "string" && /^https?:\/\//i.test(value));
-    if (nestedMatch) return nestedMatch;
+  for (const key of directKeys) {
+    if (typeof camera?.[key] === "string" && camera[key].trim()) return camera[key].trim();
   }
-
+  for (const listKey of ["VideoStreams", "Streams", "Media"]) {
+    const list = Array.isArray(camera?.[listKey]) ? camera[listKey] : [];
+    const candidate = list.find((item) => typeof item?.URL === "string" && item.URL.trim());
+    if (candidate) return candidate.URL.trim();
+  }
   return "";
 }
 
@@ -1784,30 +1773,30 @@ function renderNearestCctv(point, direction) {
   if (!selected) {
     state.currentCctvId = "";
     state.currentCctv = null;
-    clearCctvFrame("??瘝??舐??敶勗?");
-    setCctvStatus("?桀?雿蔭??瘝??舐????CCTV??);
+    clearCctvFrame("附近沒有可用國道影像");
+    setCctvStatus("目前位置附近沒有可用的國道 CCTV。");
     return;
   }
 
   const distanceLabel = selected.distance < 1000
     ? `${Math.round(selected.distance)} m`
     : `${(selected.distance / 1000).toFixed(1)} km`;
-  const directionText = selected.direction ? `嚚?{selected.direction}` : "";
-  const scopeLabel = selected.matchType === "forward" ? "?" : "???餈?;
+  const directionText = selected.direction ? `｜${selected.direction}` : "";
+  const scopeLabel = selected.matchType === "forward" ? "前方" : "附近最近";
   if (els.cctvFrame && state.currentCctvId !== selected.id) {
-    els.cctvFrame.innerHTML = `
-      <img class="cctv-image" crossorigin="anonymous" src="${selected.url}" alt="${selected.road} ${selected.mile} CCTV ?單?敶勗?">
-    `;
-    resetCctvAnalysis("撌脫??⊿嚗??芷??啣???);
+    els.cctvFrame.innerHTML = selected.url
+      ? `<img class="cctv-image" crossorigin="anonymous" src="${selected.url}" alt="${selected.road} ${selected.mile} CCTV 即時影像">`
+      : `<div class="cctv-empty">此監視器未提供公開畫面</div>`;
+    resetCctvAnalysis("已換鏡頭，尚未重新分析。");
   }
   state.currentCctvId = selected.id;
   state.currentCctv = selected;
-  setCctvStatus(`撌脰???{scopeLabel}?⊿嚗?{selected.road}${directionText} ${selected.mile || ""}嚗??Ｙ? ${distanceLabel}??敺??芸???銝?胯);
+  setCctvStatus(`已載入${scopeLabel}鏡頭：${selected.road}${directionText} ${selected.mile || ""}，距離約 ${distanceLabel}。通過後會自動換下一支。`);
   renderDriveCctv(selected);
   if (els.cctvMeta) {
     els.cctvMeta.textContent = selected.section
-      ? `${selected.section}嚚???皞?鈭日 TDX ?? CCTV ?鞈??
-      : "鞈?靘?嚗漱? TDX ?? CCTV ?鞈???;
+      ? `${selected.section}｜資料來源：交通部 TDX 國道 CCTV 開放資料。`
+      : "資料來源：交通部 TDX 國道 CCTV 開放資料。";
   }
 }
 
@@ -1855,11 +1844,11 @@ function getEffectiveHeading(point, direction) {
 function clearCctv() {
   state.currentCctvId = "";
   state.currentCctv = null;
-  clearCctvFrame("撠頛敶勗?");
+  clearCctvFrame("尚未載入影像");
   renderDriveCctv(null);
-  resetCctvAnalysis("頛敶勗?敺?函??????臭縑頠??斗??);
-  setCctvStatus("撌脫??文蔣???閬??舫??啗??亙???CCTV??);
-  if (els.cctvMeta) els.cctvMeta.textContent = "鞈?靘?嚗漱? TDX ?? CCTV ?鞈??蔣??賢辣?脫??急??⊥??剜??;
+  resetCctvAnalysis("載入影像後可用目前車道數做低可信車流判斷。");
+  setCctvStatus("已清除影像；需要時可重新載入前方 CCTV。");
+  if (els.cctvMeta) els.cctvMeta.textContent = "資料來源：交通部 TDX 國道 CCTV 開放資料。影像可能延遲或暫時無法播放。";
 }
 
 function clearCctvFrame(message) {
@@ -1880,20 +1869,17 @@ async function refreshDriveAssist(point, direction) {
     fetchVdLives(),
     fetchCctvList(),
   ]);
-
   if (vdListResult.status === "fulfilled" && vdLiveResult.status === "fulfilled") {
     state.currentVd = selectNearestVd(point, direction);
   }
-
   if (cctvResult.status === "fulfilled" && state.cctvList.length) {
     renderNearestCctv(point, direction);
   } else if (cctvResult.status === "rejected") {
     state.currentCctvId = "";
     state.currentCctv = null;
-    setCctvStatus(`CCTV 靘??急?銝?剁?${cctvResult.reason?.message || "霈?仃??}`);
     renderDriveCctv(null);
+    setCctvStatus(`CCTV 來源暫時不可用：${cctvResult.reason?.message || "請稍後再試"}`);
   }
-
   renderDriveAssist(point, direction);
 }
 
@@ -1913,11 +1899,11 @@ async function fetchVdList() {
         id: vd.VDID,
         lat: Number(vd.PositionLat),
         lng: Number(vd.PositionLon),
-        road: vd.RoadName || vd.RoadID || "??",
+        road: vd.RoadName || vd.RoadID || "國道",
         roadId: vd.RoadID || "",
         direction: vd.DetectionLinks?.[0]?.RoadDirection || "",
         laneNum: vd.DetectionLinks?.[0]?.ActualLaneNum || vd.DetectionLinks?.[0]?.LaneNum || "",
-        section: `${vd.RoadSection?.Start || ""}${vd.RoadSection?.End ? ` ??${vd.RoadSection.End}` : ""}`.trim(),
+        section: `${vd.RoadSection?.Start || ""}${vd.RoadSection?.End ? ` → ${vd.RoadSection.End}` : ""}`.trim(),
         mile: vd.LocationMile || "",
       }));
     state.vdLoadedAt = now;
@@ -1966,7 +1952,7 @@ function selectNearestVd(point, direction) {
 function renderDriveAssist(point = state.lastDrivePoint, direction = null) {
   if (!els.driveAssistView) return;
   const speedKmh = point?.speed === null || point?.speed === undefined ? NaN : point.speed * 3.6;
-  const speedLimit = estimateSpeedLimit(state.currentCctv) || estimateSpeedLimit(state.currentVd);
+  const speedLimit = estimateSpeedLimit(state.currentCctv || state.currentVd);
   const vdSummary = summarizeVdLive(state.currentVd?.live);
   const road = roadContextLabel(state.currentCctv || state.currentVd);
   const cctvDistance = state.currentCctv?.distance;
@@ -1979,22 +1965,22 @@ function renderDriveAssist(point = state.lastDrivePoint, direction = null) {
       ? (cctvDistance < 1000 ? `${Math.round(cctvDistance)} m` : `${(cctvDistance / 1000).toFixed(1)} km`)
       : "--";
   }
-  if (els.driveAssistRoad) els.driveAssistRoad.textContent = road || "撠??頝舀挾鞈?";
+  if (els.driveAssistRoad) els.driveAssistRoad.textContent = road || "尚未取得路段資訊";
 
   const overSpeed = speedLimit && Number.isFinite(speedKmh) && speedKmh > speedLimit + 5;
   if (els.driveAssistAlert) {
-    els.driveAssistAlert.textContent = overSpeed ? `?撮頞?+${Math.round(speedKmh - speedLimit)} km/h` : "?漲甇?虜";
+    els.driveAssistAlert.textContent = overSpeed ? `疑似超速 +${Math.round(speedKmh - speedLimit)} km/h` : "速度正常";
     els.driveAssistAlert.classList.toggle("danger", Boolean(overSpeed));
   }
 
   const laneSuggestion = vdSummary.fastestLane
-    ? `VD 憿舐內 ${vdSummary.fastestLane.label} 頛?`
-    : "?頝舀?";
+    ? `VD 顯示 ${vdSummary.fastestLane.label} 較順`
+    : "先照路況";
   if (els.driveAssistRecommendation) els.driveAssistRecommendation.textContent = laneSuggestion;
   if (els.driveAssistDetail) {
     els.driveAssistDetail.textContent = vdSummary.fastestLane
-      ? `甇斤?菜葫?刻??漲嚗?蝑?撠?誘嚗?隞亙??刻??Ｚ??曉璅??箸??
-      : `蝑? VD ?漲??CCTV ??敺???靘?摰??;
+      ? `此為偵測器車道速度，不等同導航指令；請以安全距離與現場標線為準。`
+      : `等待 VD 速度或 CCTV 分析後，才提供保守參考。`;
   }
   renderDriveLaneSpeeds(vdSummary);
 }
@@ -2005,26 +1991,22 @@ function renderDriveCctv(camera) {
     els.driveAssistCctvFrame.innerHTML = `<div class="cctv-empty">尚未載入監視器畫面</div>`;
     return;
   }
-  if (!camera.url) {
-    els.driveAssistCctvFrame.innerHTML = `<div class="cctv-empty">此監視器未提供公開畫面</div>`;
-    return;
-  }
-  els.driveAssistCctvFrame.innerHTML = `
-    <img class="cctv-image" crossorigin="anonymous" src="${camera.url}" alt="${camera.road} ${camera.mile} CCTV 即時畫面">
-  `;
+  els.driveAssistCctvFrame.innerHTML = camera.url
+    ? `<img class="cctv-image" crossorigin="anonymous" src="${camera.url}" alt="${camera.road} ${camera.mile} CCTV 即時影像">`
+    : `<div class="cctv-empty">此監視器未提供公開畫面</div>`;
 }
 
 function renderDriveLaneSpeeds(summary) {
   if (!els.driveAssistLaneSpeeds) return;
   if (!summary.lanes.length) {
-    els.driveAssistLaneSpeeds.textContent = "VD 頠??漲撠頛";
+    els.driveAssistLaneSpeeds.textContent = "VD 車道速度尚未載入";
     return;
   }
   els.driveAssistLaneSpeeds.innerHTML = summary.lanes.map((lane) => `
     <div>
       <strong>${lane.label}</strong>
       <span>${lane.speed ? `${lane.speed} km/h` : "-- km/h"}</span>
-      <small>????${lane.occupancy ?? "--"}%</small>
+      <small>占有率 ${lane.occupancy ?? "--"}%</small>
     </div>
   `).join("");
 }
@@ -2034,7 +2016,7 @@ function summarizeVdLive(live) {
     .flatMap((flow) => flow.Lanes || [])
     .filter((lane) => lane.LaneType === 1)
     .map((lane, index) => ({
-      label: `蝚?${index + 1} 頠?`,
+      label: `第 ${index + 1} 車道`,
       speed: Math.round(lane.Speed || 0),
       occupancy: lane.Occupancy ?? null,
     }))
@@ -2049,18 +2031,18 @@ function summarizeVdLive(live) {
 function roadContextLabel(source) {
   if (!source) return "";
   const direction = directionText(source.direction);
-  const section = source.section ? `嚚?{source.section}` : "";
-  const mile = source.mile ? `嚚?{source.mile}` : "";
-  return `${source.road || "??"}${direction ? ` ${direction}` : ""}${mile}${section}`;
+  const section = source.section ? `｜${source.section}` : "";
+  const mile = source.mile ? `｜${source.mile}` : "";
+  return `${source.road || "國道"}${direction ? ` ${direction}` : ""}${mile}${section}`;
 }
 
 function directionText(direction) {
-  return ({ N: "??", S: "??", E: "?勗?", W: "镼踹?" })[direction] || direction || "";
+  return ({ N: "北向", S: "南向", E: "東向", W: "西向" })[direction] || direction || "";
 }
 
 function estimateSpeedLimit(source) {
   if (!source?.road && !source?.roadId) return null;
-  if ((source.road || "").includes("??") || String(source.roadId || "").startsWith("0000")) return 100;
+  if ((source.road || "").includes("國") || String(source.roadId || "").startsWith("0000")) return 100;
   return null;
 }
 
@@ -2068,17 +2050,17 @@ async function analyzeCctvFlow() {
   if (state.cctvAnalysisBusy) return;
   const image = els.cctvFrame?.querySelector?.(".cctv-image");
   if (!image) {
-    setCctvAnalysis("撠頛敶勗?", "隢????亙??孵蔣???銵?瘚???, []);
+    setCctvAnalysis("尚未載入影像", "請先按「載入前方影像」，再執行車流分析。", []);
     return;
   }
   if (!image.complete) {
-    setCctvAnalysis("敶勗?隞頛", "隢? CCTV ?恍?箇敺?????, []);
+    setCctvAnalysis("影像仍在載入", "請等 CCTV 畫面出現後再分析。", []);
     return;
   }
 
   state.cctvAnalysisBusy = true;
   if (els.analyzeCctv) els.analyzeCctv.disabled = true;
-  setCctvAnalysis("??銝?, "甇??瑕??拙?????ｇ?瘥?????憛???, []);
+  setCctvAnalysis("分析中", "正在擷取兩個時間點的畫面，比較各車道區塊變化。", []);
 
   try {
     const first = captureCctvFrame(image);
@@ -2089,8 +2071,8 @@ async function analyzeCctvFlow() {
     renderCctvAnalysis(result);
   } catch (err) {
     setCctvAnalysis(
-      "?⊥???甇文蔣??,
-      "甇?CCTV 靘??航銝?閮勗?蝡航??蔣??蝝?隞鈭箏極?亦??恍嚗??急?銝?芸??斗頠??漲??,
+      "無法分析此影像",
+      "此 CCTV 來源可能不允許前端讀取影像像素；仍可人工查看畫面，但暫時不能自動判斷車道速度。",
       []
     );
   } finally {
@@ -2167,20 +2149,20 @@ function analyzeLaneMotion(first, second, laneCount) {
     .map((lane) => ({ ...lane }))
     .sort((a, b) => b.flowScore - a.flowScore);
   const spread = ranked[0]?.flowScore - ranked.at(-1)?.flowScore;
-  const confidence = spread > 9 ? "雿靽? : "鞈?銝雲";
+  const confidence = spread > 9 ? "低可信" : "資料不足";
   return { lanes, ranked, confidence };
 }
 
 function cameraLaneLabel(index, laneCount) {
-  if (laneCount === 2) return index === 0 ? "?恍撌血" : "?恍?喳";
-  if (index === 0) return "?恍撌血";
-  if (index === laneCount - 1) return "?恍?喳";
-  return laneCount > 3 ? `?恍銝剝? ${index}` : "?恍銝剝?";
+  if (laneCount === 2) return index === 0 ? "畫面左側" : "畫面右側";
+  if (index === 0) return "畫面左側";
+  if (index === laneCount - 1) return "畫面右側";
+  return laneCount > 3 ? `畫面中間 ${index}` : "畫面中間";
 }
 
 function renderCctvAnalysis(result) {
   if (!result.ranked.length) {
-    setCctvAnalysis("鞈?銝雲", "敶勗??臬????云撠??思?????, []);
+    setCctvAnalysis("資料不足", "影像可分析範圍太少，暫不排序。", []);
     return;
   }
   const top = result.ranked[0];
@@ -2188,11 +2170,11 @@ function renderCctvAnalysis(result) {
   const rows = result.ranked.map((lane) => ({
     label: lane.label,
     value: `${Math.max(0, Math.round(lane.flowScore))}`,
-    note: `霈? ${lane.motionScore.toFixed(1)}嚚???${(lane.occupancy * 100).toFixed(0)}%`,
+    note: `變化 ${lane.motionScore.toFixed(1)}｜占用 ${(lane.occupancy * 100).toFixed(0)}%`,
   }));
   setCctvAnalysis(
-    `${result.confidence}嚗?{top.label}頛?`,
-    `?恍?憛??摨?${order}?迨?斗?芯誨銵?CCTV ?恍?憛?銝?摰??澆祕?/憭??,
+    `${result.confidence}：${top.label}較順`,
+    `畫面區塊優先順序：${order}。此判斷只代表 CCTV 畫面區塊，不一定等於實際內/外線。`,
     rows
   );
 }
@@ -2203,7 +2185,7 @@ function setCctvAnalysis(title, detail, rows) {
     ? `<div class="cctv-analysis-list">${rows.map((row) => `
         <div>
           <strong>${row.label}</strong>
-          <span>? ${row.value}</span>
+          <span>分數 ${row.value}</span>
           <small>${row.note}</small>
         </div>
       `).join("")}</div>`
@@ -2216,7 +2198,7 @@ function setCctvAnalysis(title, detail, rows) {
 }
 
 function resetCctvAnalysis(detail) {
-  setCctvAnalysis("撠??", detail, []);
+  setCctvAnalysis("尚未分析", detail, []);
 }
 
 function wait(ms) {
@@ -2275,8 +2257,8 @@ function getRouteSegment(point, direction) {
   const progress = routeProgress(point, direction);
   if (!Number.isFinite(progress)) return null;
   const labels = direction === "yangmei_to_xindian"
-    ? ["璆?蝡?, "銝剖ㄑ/獢?畾?, "?????折???", "?啣?蝡?]
-    : ["?啣?蝡?, "?????折???", "獢?/銝剖ㄑ畾?, "璆?蝡?];
+    ? ["楊梅端", "中壢/桃園段", "北桃園/隧道前後", "新店端"]
+    : ["新店端", "北桃園/隧道前後", "桃園/中壢段", "楊梅端"];
   const index = Math.max(0, Math.min(3, Math.floor(progress * 4)));
   return {
     index,
@@ -2296,8 +2278,8 @@ function getLiveRouteSegment(point, direction) {
 
 function routeSegmentFromProgress(progress, direction) {
   const labels = direction === "yangmei_to_xindian"
-    ? ["璆?蝡?, "銝剖ㄑ/獢?畾?, "?????折???", "?啣?蝡?]
-    : ["?啣?蝡?, "?????折???", "獢?/銝剖ㄑ畾?, "璆?蝡?];
+    ? ["楊梅端", "中壢/桃園段", "北桃園/隧道前後", "新店端"]
+    : ["新店端", "北桃園/隧道前後", "桃園/中壢段", "楊梅端"];
   const index = Math.max(0, Math.min(3, Math.floor(progress * 4)));
   return {
     index,
@@ -2320,9 +2302,9 @@ function recommendLaneForSegment(direction, segmentIndex) {
   const currentLane = getEffectiveLane();
   if (currentLane?.source === "manual") {
     return {
-      title: `?桀? ${currentLane.label}`,
-      detail: "撌脣皜砍雿???璅??桀?頠?嚗??Ｗ?隞交???閮銝鳴??踹?甇瑕鞈?隤文??,
-      confidenceLabel: "??",
+      title: `目前 ${currentLane.label}`,
+      detail: "已偵測到你有手動標記目前車道，即時畫面先以手動標記為主，避免歷史資料誤判。",
+      confidenceLabel: "手動",
       level: "good",
     };
   }
@@ -2356,9 +2338,9 @@ function recommendLaneForSegment(direction, segmentIndex) {
   const topLane = Object.entries(laneStats).sort((a, b) => b[1] - a[1])[0];
   if (!topLane) {
     return {
-      title: "?頝舀?",
-      detail: "???頝舀挾???雲憭??????匱蝥敞蝛???,
-      confidenceLabel: "鞈?銝雲",
+      title: "先照路況",
+      detail: "這個方向與路段還沒有足夠車道紀錄，先繼續累積資料。",
+      confidenceLabel: "資料不足",
       level: "warn",
     };
   }
@@ -2366,44 +2348,44 @@ function recommendLaneForSegment(direction, segmentIndex) {
   const share = topLane[1] / samples;
   const avgSpeed = speedCount ? Math.round(speedTotal / speedCount) : null;
   const confidenceLabel = tripIds.size >= 3 && samples >= 80 && share >= .45
-    ? "銝?
-    : "雿?;
-  const title = confidenceLabel === "銝? ? `撱箄降 ${topLane[0]}` : `?怠? ${topLane[0]}`;
+    ? "中"
+    : "低";
+  const title = confidenceLabel === "中" ? `建議 ${topLane[0]}` : `暫定 ${topLane[0]}`;
   const detailParts = [
-    `靘?${tripIds.size} 頞?{samples} 蝑?頝舀挾蝝?隡啜,
-    avgSpeed ? `閰脰楝畾萄像?? ${avgSpeed} km/h? : "",
-    confidenceLabel === "雿? ? "鞈?隞?嚗?隞亙?楝瘜?摰?箔蜓?? : "?臭??箇?楝畾萄???,
+    `依 ${tripIds.size} 趟、${samples} 筆同路段紀錄推估。`,
+    avgSpeed ? `該路段平均約 ${avgSpeed} km/h。` : "",
+    confidenceLabel === "低" ? "資料仍少，請以即時路況與安全為主。" : "可作為目前路段參考。",
   ].filter(Boolean);
 
   return {
     title,
     detail: detailParts.join(" "),
     confidenceLabel,
-    level: confidenceLabel === "銝? ? "good" : "warn",
+    level: confidenceLabel === "中" ? "good" : "warn",
   };
 }
 
 function directionLabelText(direction) {
-  if (direction === "yangmei_to_xindian") return "璆? ???啣?";
-  if (direction === "xindian_to_yangmei") return "?啣? ??璆?";
+  if (direction === "yangmei_to_xindian") return "楊梅 → 新店";
+  if (direction === "xindian_to_yangmei") return "新店 → 楊梅";
   return "";
 }
 
 function buildDashboardModel(trips) {
   const validTrips = normalizeTrips(trips);
   const directions = [
-    buildDirectionModel(validTrips, "yangmei_to_xindian", "璆? ???啣?"),
-    buildDirectionModel(validTrips, "xindian_to_yangmei", "?啣? ??璆?"),
+    buildDirectionModel(validTrips, "yangmei_to_xindian", "楊梅 → 新店"),
+    buildDirectionModel(validTrips, "xindian_to_yangmei", "新店 → 楊梅"),
   ];
   const totalTrips = directions.reduce((sum, item) => sum + item.tripCount, 0);
   const totalPoints = validTrips.reduce((sum, trip) => sum + (trip.points?.length || 0), 0);
   const totalLaneSamples = validTrips.reduce((sum, trip) => sum + (trip.laneSamples?.length || 0), 0);
   const readyDirections = directions.filter((item) => item.isReady).length;
   const verdict = readyDirections
-    ? "撌脫??孵??臬?甇亙???
+    ? "已有方向可初步參考"
     : totalTrips
-      ? "鞈?隞?撠???頞典"
-      : "撠??銵?";
+      ? "資料仍偏少，先看趨勢"
+      : "尚無有效行程";
 
   return {
     totalTrips,
@@ -2421,14 +2403,14 @@ function buildDirectionModel(trips, directionKey, label) {
   const avgMinutes = tripCount ? Math.round(directionTrips.reduce((sum, trip) => sum + (trip.summary?.minutes || summarizeTrip(trip).minutes), 0) / tripCount) : 0;
   const avgKm = tripCount ? Number((directionTrips.reduce((sum, trip) => sum + ((trip.distanceMeters || 0) / 1000), 0) / tripCount).toFixed(1)) : 0;
   const laneCounts = countLanes(directionTrips);
-  const mainLane = laneCounts[0]?.[0] || "撠頠?鞈?";
+  const mainLane = laneCounts[0]?.[0] || "尚無車道資料";
   const isReady = tripCount >= 3 && laneCounts.length > 0;
-  const recommendationTitle = isReady ? `?桀??臬???${mainLane}` : "?桀?銝遣霅唬?摰?";
+  const recommendationTitle = isReady ? `目前可先參考：${mainLane}` : "目前不建議下定論";
   const recommendationDetail = isReady
-    ? `甇斗?歇??${tripCount} 頞????臬??其蜓閬???箸?嚗?蝥?閬敞蝛?撜啜憭押???銝??箇??鞈??
+    ? `此方向已有 ${tripCount} 趟紀錄，可先用主要車道當基準；後續還要累積尖峰、雨天、事故與不同出發時間資料。`
     : tripCount
-      ? `?桀??芣? ${tripCount} 頞??????拙??隅?ｇ?銝??亙摰?雿唾????雿唾楝蝺
-      : "甇斗???芣???蝝??;
+      ? `目前只有 ${tripCount} 趟有效紀錄，適合看趨勢，不適合直接判定最佳車道或最佳路線。`
+      : "此方向尚未有有效紀錄。";
 
   return {
     key: directionKey,
@@ -2461,10 +2443,10 @@ function countLanes(trips) {
 
 function buildSegmentModels(trips) {
   const buckets = [
-    { label: "?挾", laneCounts: {}, speeds: [] },
-    { label: "銝剖?", laneCounts: {}, speeds: [] },
-    { label: "銝剖?", laneCounts: {}, speeds: [] },
-    { label: "敺挾", laneCounts: {}, speeds: [] },
+    { label: "前段", laneCounts: {}, speeds: [] },
+    { label: "中前", laneCounts: {}, speeds: [] },
+    { label: "中後", laneCounts: {}, speeds: [] },
+    { label: "後段", laneCounts: {}, speeds: [] },
   ];
 
   for (const trip of trips) {
@@ -2485,7 +2467,7 @@ function buildSegmentModels(trips) {
   }
 
   return buckets.map((bucket) => {
-    const lane = Object.entries(bucket.laneCounts).sort((a, b) => b[1] - a[1])[0]?.[0] || "鞈?銝雲";
+    const lane = Object.entries(bucket.laneCounts).sort((a, b) => b[1] - a[1])[0]?.[0] || "資料不足";
     const speed = bucket.speeds.length
       ? `${Math.round(bucket.speeds.reduce((sum, value) => sum + value, 0) / bucket.speeds.length)} km/h`
       : "-- km/h";
@@ -2538,8 +2520,8 @@ function resetActiveTripUi() {
 function saveRecoverableTrip() {
   const recoveredTrip = prepareRecoveredTrip(getRecoverableTrip());
   if (!recoveredTrip) {
-    setUploadStatus("?桀?瘝??舀??港?摮?摰???????);
-    setStatus("瘝??舀??渲???, "?桀??阮瘝?摰?暺?頠?鈭辣", false);
+    setUploadStatus("目前沒有可救援保存的定位或車道資料。");
+    setStatus("沒有可救援資料", "目前草稿沒有定位點或車道事件", false);
     return;
   }
 
@@ -2552,14 +2534,14 @@ function saveRecoverableTrip() {
   resetActiveTripUi();
   renderHistory();
   renderDashboard();
-  setStatus("撌脫??港?摮?, "鞈?撌脣神?交璈風?脩???, false);
-  setUploadStatus("撌脫??港?摮?祆?嚗遣霅啁??餅???箏???CSV?????單??啜?);
+  setStatus("已救援保存", "資料已寫入本機歷史紀錄", false);
+  setUploadStatus("已救援保存到本機；建議立刻按「匯出完整 CSV」或「上傳最新」。");
 }
 
 function exportRecoverableTrip() {
   const recoveredTrip = prepareRecoveredTrip(getRecoverableTrip());
   if (!recoveredTrip) {
-    setUploadStatus("?桀?瘝??臬?箇??阮鞈???);
+    setUploadStatus("目前沒有可匯出的草稿資料。");
     return;
   }
 
@@ -2571,7 +2553,7 @@ function exportRecoverableTrip() {
     trip: recoveredTrip,
   };
   downloadFile(`commute-recovered-${fileStamp()}.json`, JSON.stringify(payload, null, 2), "application/json;charset=utf-8");
-  setUploadStatus("撌脣?箸??渲?蝔?JSON嚗閬?Excel ?敦嚗??????港?摮?????臬摰 CSV??);
+  setUploadStatus("已匯出救援草稿 JSON；若要 Excel 明細，請先按「救援保存目前資料」再匯出完整 CSV。");
 }
 
 function exportCsv() {
@@ -2890,16 +2872,16 @@ function secondsBetween(startAt, endAt) {
 async function uploadLatestTrip() {
   state.trips = normalizeTrips(state.trips);
   if (!state.trips.length) {
-    setUploadStatus("?桀?瘝??臭??喟?蝝??);
+    setUploadStatus("目前沒有可上傳的紀錄。");
     return;
   }
-  await uploadTrip(state.trips[0], "??銝??唬?頞?);
+  await uploadTrip(state.trips[0], "手動上傳最新一趟");
 }
 
 async function uploadAllTrips() {
   state.trips = normalizeTrips(state.trips);
   if (!state.trips.length) {
-    setUploadStatus("?桀?瘝??臭??喟?蝝??);
+    setUploadStatus("目前沒有可上傳的紀錄。");
     return;
   }
   await uploadPayload({
@@ -2908,7 +2890,7 @@ async function uploadAllTrips() {
     app: "commute-memory",
     version: 4,
     trips: state.trips,
-  }, `撌脤?券 ${state.trips.length} 頞??);
+  }, `已送出全部 ${state.trips.length} 趟紀錄。`);
 }
 
 async function uploadTrip(trip, reason) {
@@ -2919,17 +2901,17 @@ async function uploadTrip(trip, reason) {
     app: "commute-memory",
     version: 4,
     trip,
-  }, `撌脤 ${formatDate(new Date(trip.startedAt))} ??蝝?);
+  }, `已送出 ${formatDate(new Date(trip.startedAt))} 這趟紀錄。`);
 }
 
 async function uploadPayload(payload, successMessage) {
   const endpoint = state.uploadEndpoint || els.uploadEndpoint?.value.trim() || defaultUploadEndpoint;
   if (!endpoint) {
-    setUploadStatus("撠閮剖?銝蝬脣???);
+    setUploadStatus("尚未設定上傳網址。");
     return;
   }
 
-  setUploadStatus("銝銝?..");
+  setUploadStatus("上傳中...");
   try {
     const response = await fetch(endpoint, {
       method: "POST",
@@ -2938,7 +2920,7 @@ async function uploadPayload(payload, successMessage) {
       keepalive: true,
     });
     const text = await response.text();
-    if (!response.ok || text.includes("?航炊") || text.includes("?曆??唬誑銝?隞斤Ⅳ?賢?")) {
+    if (!response.ok || text.includes("錯誤") || text.includes("找不到以下指令碼函式")) {
       const error = new Error(extractGoogleScriptError(text) || `HTTP ${response.status}`);
       error.confirmedFailure = true;
       throw error;
@@ -2946,7 +2928,7 @@ async function uploadPayload(payload, successMessage) {
     setUploadStatus(successMessage);
   } catch (err) {
     if (err.confirmedFailure) {
-      setUploadStatus(`銝憭望?嚗?{err.message}`);
+      setUploadStatus(`上傳失敗：${err.message}`);
       return;
     }
     try {
@@ -2957,9 +2939,9 @@ async function uploadPayload(payload, successMessage) {
         body: JSON.stringify(payload),
         keepalive: true,
       });
-      setUploadStatus(`${successMessage}嚗汗?其???交蝯?嚗?蝣箄? Google Sheet嚗);
+      setUploadStatus(`${successMessage}（瀏覽器不回報接收結果，請確認 Google Sheet）`);
     } catch {
-      setUploadStatus(`銝憭望?嚗?{err.message}`);
+      setUploadStatus(`上傳失敗：${err.message}`);
     }
   }
 }
@@ -3016,7 +2998,7 @@ function setStatus(title, detail, active) {
 }
 
 function clearAllLocalRecords() {
-  if (state.trip && !window.confirm("?桀?甇?蝝??蝣箏?閬??斗璈風?脯?蝔輯??桀?頠楚??")) return;
+  if (state.trip && !window.confirm("目前正在紀錄，確定要清除本機歷史、草稿與目前軌跡嗎？")) return;
   if (state.watchId !== null) navigator.geolocation.clearWatch(state.watchId);
   window.clearInterval(state.elapsedTimer);
   state.trips = [];
@@ -3036,8 +3018,8 @@ function clearAllLocalRecords() {
   els.speed.textContent = "-- km/h";
   els.distance.textContent = "0.0 km";
   els.pointCount.textContent = "0";
-  setRouteNote("撌脫??斗璈風?脯?蝔輯??桀?頠楚??);
-  setStatus("撌脫??斤???, "?舫??圈?憪敞蝛???, false);
+  setRouteNote("已清除本機歷史、草稿與目前軌跡。");
+  setStatus("已清除紀錄", "可重新開始累積資料", false);
   updateRecordingOverlay();
   updateDriveConsole();
   drawRoute();
@@ -3070,6 +3052,10 @@ els.uploadLatest.addEventListener("click", uploadLatestTrip);
 els.uploadAll.addEventListener("click", uploadAllTrips);
 els.saveUploadEndpoint?.addEventListener("click", saveUploadEndpoint);
 els.clearHistory.addEventListener("click", clearAllLocalRecords);
+window.addEventListener?.("pagehide", () => saveTripDraft(true));
+document.addEventListener?.("visibilitychange", () => {
+  if (document.visibilityState === "hidden") saveTripDraft(true);
+});
 els.flowButtons.querySelectorAll("button").forEach((button) => {
   button.addEventListener("click", () => setTrafficFlow(button.dataset.flow));
 });
@@ -3079,7 +3065,7 @@ buildManualLaneButtons();
 updateSegmentedState();
 els.zoomControl.classList.add("is-hidden");
 if (els.uploadEndpoint) els.uploadEndpoint.value = state.uploadEndpoint;
-setUploadStatus("撌脣撱?Google Sheet 銝雿蔭嚗???蝔??芸?銝??);
+setUploadStatus("已內建 Google Sheet 上傳位置；結束行程會自動上傳。");
 updateRecordingOverlay();
 updateDriveConsole();
 renderDriveAssist();
@@ -3087,4 +3073,3 @@ drawRouteGrid(els.routeCanvas.getContext("2d"), els.routeCanvas.width, els.route
 renderHistory();
 renderDashboard();
 showRestoreDraft();
-
