@@ -4,6 +4,7 @@ const draftStorageKey = "commute-memory-trip-draft-v1";
 const uploadEndpointKey = "commute-memory-upload-endpoint";
 const defaultUploadEndpoint = "https://script.google.com/macros/s/AKfycbxyCTrMum6RvHmj2n0O5Yh4In8w4uUiGshhLI1ByLx0skZpJJbGQivfBJIl91LtDmc/exec";
 const seedTrips = Array.isArray(window.COMMUTE_SEED_TRIPS) ? window.COMMUTE_SEED_TRIPS : [];
+const officialCctvSeed = Array.isArray(window.COMMUTE_OFFICIAL_CCTVS) ? window.COMMUTE_OFFICIAL_CCTVS : [];
 const maxStoredTrips = 30;
 const maxStoredPoints = 900;
 const maxDraftPoints = 700;
@@ -15,6 +16,7 @@ const vdStaticCacheMs = 6 * 60 * 60 * 1000;
 const vdLiveCacheMs = 60 * 1000;
 const cctvMaxDistanceMeters = 1200;
 const cctvFallbackDistanceMeters = 5000;
+const cctvTargetDistanceMeters = 3000;
 const cctvForwardBearingTolerance = 80;
 const cctvAdvanceSwitchMeters = 500;
 const minVisionConfidence = 45;
@@ -23,6 +25,7 @@ const maxReliableAccuracyMeters = 180;
 const maxReliableSpeedKmh = 170;
 
 const els = {
+  appShell: document.querySelector(".app-shell"),
   floatingRecorder: document.querySelector("#floatingRecorder"),
   modeRecord: document.querySelector("#modeRecord"),
   modeDrive: document.querySelector("#modeDrive"),
@@ -39,7 +42,9 @@ const els = {
   driveAssistCctvDistance: document.querySelector("#driveAssistCctvDistance"),
   driveAssistRoad: document.querySelector("#driveAssistRoad"),
   driveAssistCctvFrame: document.querySelector("#driveAssistCctvFrame"),
+  driveAssistCameraMeta: document.querySelector("#driveAssistCameraMeta"),
   driveAssistLaneSpeeds: document.querySelector("#driveAssistLaneSpeeds"),
+  driveAssistLaneMeta: document.querySelector("#driveAssistLaneMeta"),
   guidanceView: document.querySelector("#guidanceView"),
   guidanceToggle: document.querySelector("#guidanceToggle"),
   guidanceTitle: document.querySelector("#guidanceTitle"),
@@ -125,7 +130,10 @@ const state = {
   lastCctvPoint: null,
   currentCctvId: "",
   currentCctv: null,
+  failedCctvIds: new Set(),
   cctvAnalysisBusy: false,
+  cctvVision: null,
+  cctvVisionBusy: false,
   vdList: [],
   vdLives: new Map(),
   vdLoadedAt: 0,
@@ -1362,6 +1370,9 @@ function setViewMode(mode) {
   els.driveAssistView?.classList.toggle("is-hidden", !showDrive);
   els.guidanceView?.classList.toggle("is-hidden", !showGuidance);
   els.dashboardView?.classList.toggle("is-hidden", !showDashboard);
+  els.appShell?.classList.toggle("is-drive-mode", showDrive);
+  if (document.body?.dataset) document.body.dataset.viewMode = mode;
+  if (showDrive && typeof window.scrollTo === "function") window.scrollTo({ top: 0, behavior: "auto" });
   if (showDashboard) renderDashboard();
   if (showDrive) renderDriveAssist();
 }
@@ -1721,6 +1732,11 @@ async function fetchCctvList() {
 
   state.cctvLoading = true;
   try {
+    if (officialCctvSeed.length) {
+      state.cctvList = officialCctvSeed;
+      state.cctvLoadedAt = now;
+      return state.cctvList;
+    }
     const response = await fetch(cctvEndpoint, { cache: "force-cache" });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const payload = await response.json();
@@ -1729,6 +1745,7 @@ async function fetchCctvList() {
       .map((camera) => ({
         id: camera.CCTVID,
         url: extractCctvUrl(camera),
+        mediaKind: getCctvMediaKind(camera),
         lat: Number(camera.PositionLat),
         lng: Number(camera.PositionLon),
         road: camera.RoadName || camera.RoadID || "國道",
@@ -1744,28 +1761,79 @@ async function fetchCctvList() {
 }
 
 function extractCctvUrl(camera) {
-  const directKeys = [
-    "VideoStreamURL",
+  const imageKeys = [
     "VideoImageURL",
     "ImageURL",
     "SnapshotURL",
-    "LiveStreamURL",
-    "VideoURL",
+    "ImageUrl",
+    "SnapshotUrl",
+    "PictureURL",
+    "JpegURL",
+  ];
+  const genericKeys = [
     "CCTVURL",
     "CctvURL",
     "Url",
     "URL",
     "MediaURL",
   ];
-  for (const key of directKeys) {
-    if (typeof camera?.[key] === "string" && camera[key].trim()) return camera[key].trim();
+  const streamKeys = ["VideoStreamURL", "LiveStreamURL", "VideoURL"];
+  const readUrl = (value) => typeof value === "string" ? value.trim() : "";
+
+  for (const key of imageKeys) {
+    const url = readUrl(camera?.[key]);
+    if (url) return url;
   }
   for (const listKey of ["VideoStreams", "Streams", "Media"]) {
     const list = Array.isArray(camera?.[listKey]) ? camera[listKey] : [];
-    const candidate = list.find((item) => typeof item?.URL === "string" && item.URL.trim());
-    if (candidate) return candidate.URL.trim();
+    const candidate = list
+      .map((item) => readUrl(item?.ImageURL || item?.SnapshotURL || item?.URL))
+      .find(Boolean);
+    if (candidate) return candidate;
+  }
+  for (const key of genericKeys) {
+    const url = readUrl(camera?.[key]);
+    if (url) return url;
+  }
+  for (const key of streamKeys) {
+    const url = readUrl(camera?.[key]);
+    if (url) return url;
   }
   return "";
+}
+
+function getCctvMediaKind(camera) {
+  const url = extractCctvUrl(camera);
+  if (!url) return "none";
+
+  const imageKeys = ["VideoImageURL", "ImageURL", "SnapshotURL", "ImageUrl", "SnapshotUrl", "PictureURL", "JpegURL"];
+  if (imageKeys.some((key) => typeof camera?.[key] === "string" && camera[key].trim() === url)) {
+    return "image";
+  }
+
+  const streamKeys = ["VideoStreamURL", "LiveStreamURL", "VideoURL"];
+  if (streamKeys.some((key) => typeof camera?.[key] === "string" && camera[key].trim() === url)) {
+    return "video";
+  }
+
+  for (const listKey of ["VideoStreams", "Streams", "Media"]) {
+    const list = Array.isArray(camera?.[listKey]) ? camera[listKey] : [];
+    if (list.some((item) => [item?.ImageURL, item?.SnapshotURL].includes(url))) return "image";
+    if (list.some((item) => [item?.VideoStreamURL, item?.StreamURL, item?.URL].includes(url))) {
+      return listKey === "Media" && !isCctvStreamUrl(url) ? "image" : "video";
+    }
+  }
+
+  return isCctvStreamUrl(url) ? "video" : "image";
+}
+
+function isCctvStreamUrl(url) {
+  return /\.(m3u8|mp4|webm|mov)(?:[?#]|$)/i.test(url);
+}
+
+function freshCctvImageUrl(url) {
+  const separator = url.includes("?") ? "&" : "?";
+  return `${url}${separator}commuteRefresh=${Math.floor(Date.now() / 10000)}`;
 }
 
 function renderNearestCctv(point, direction) {
@@ -1774,6 +1842,7 @@ function renderNearestCctv(point, direction) {
     state.currentCctvId = "";
     state.currentCctv = null;
     clearCctvFrame("附近沒有可用國道影像");
+    renderDriveCctv(null);
     setCctvStatus("目前位置附近沒有可用的國道 CCTV。");
     return;
   }
@@ -1783,14 +1852,15 @@ function renderNearestCctv(point, direction) {
     : `${(selected.distance / 1000).toFixed(1)} km`;
   const directionText = selected.direction ? `｜${selected.direction}` : "";
   const scopeLabel = selected.matchType === "forward" ? "前方" : "附近最近";
-  if (els.cctvFrame && state.currentCctvId !== selected.id) {
-    els.cctvFrame.innerHTML = selected.url
-      ? `<img class="cctv-image" crossorigin="anonymous" src="${selected.url}" alt="${selected.road} ${selected.mile} CCTV 即時影像">`
-      : `<div class="cctv-empty">此監視器未提供公開畫面</div>`;
-    resetCctvAnalysis("已換鏡頭，尚未重新分析。");
-  }
+  const changedCamera = state.currentCctvId !== selected.id
+    || state.currentCctv?.url !== selected.url
+    || state.currentCctv?.mediaKind !== selected.mediaKind;
   state.currentCctvId = selected.id;
   state.currentCctv = selected;
+  if (changedCamera) {
+    renderCctvImage(els.cctvFrame, selected);
+    resetCctvAnalysis("已換鏡頭，尚未重新分析。");
+  }
   setCctvStatus(`已載入${scopeLabel}鏡頭：${selected.road}${directionText} ${selected.mile || ""}，距離約 ${distanceLabel}。通過後會自動換下一支。`);
   renderDriveCctv(selected);
   if (els.cctvMeta) {
@@ -1803,6 +1873,7 @@ function renderNearestCctv(point, direction) {
 function selectForwardCctv(point, direction) {
   const heading = getEffectiveHeading(point, direction);
   const candidates = state.cctvList
+    .filter((camera) => !state.failedCctvIds.has(camera.id))
     .map((camera) => {
       const distance = distanceBetween(point, { lat: camera.lat, lng: camera.lng });
       const bearing = bearingBetween(point, { lat: camera.lat, lng: camera.lng });
@@ -1819,13 +1890,20 @@ function selectForwardCctv(point, direction) {
       return scoreA - scoreB;
     });
 
-  const nearbyForwardCandidates = forwardCandidates.filter((camera) => camera.distance <= cctvMaxDistanceMeters);
-  const nextForward = forwardCandidates.find((camera) => camera.distance >= cctvAdvanceSwitchMeters);
-  if (nearbyForwardCandidates[0] && nearbyForwardCandidates[0].distance < cctvAdvanceSwitchMeters && nextForward) {
-    return { ...nextForward, matchType: "forward" };
+  const current = forwardCandidates.find((camera) => camera.id === state.currentCctvId);
+  if (current && current.distance > cctvAdvanceSwitchMeters) {
+    return { ...current, matchType: "held" };
   }
-  if (nearbyForwardCandidates[0]) return { ...nearbyForwardCandidates[0], matchType: "forward" };
-  if (nextForward) return { ...nextForward, matchType: "forward" };
+
+  const aheadCandidates = forwardCandidates.filter((camera) => camera.distance >= cctvAdvanceSwitchMeters);
+  const target = aheadCandidates
+    .slice()
+    .sort((a, b) => {
+      const scoreA = Math.abs(a.distance - cctvTargetDistanceMeters) + (a.bearingDelta * 8);
+      const scoreB = Math.abs(b.distance - cctvTargetDistanceMeters) + (b.bearingDelta * 8);
+      return scoreA - scoreB;
+    })[0];
+  if (target) return { ...target, matchType: "target" };
 
   const nearest = candidates.sort((a, b) => a.distance - b.distance)[0];
   return nearest ? { ...nearest, matchType: "nearest" } : null;
@@ -1844,6 +1922,7 @@ function getEffectiveHeading(point, direction) {
 function clearCctv() {
   state.currentCctvId = "";
   state.currentCctv = null;
+  state.failedCctvIds.clear();
   clearCctvFrame("尚未載入影像");
   renderDriveCctv(null);
   resetCctvAnalysis("載入影像後可用目前車道數做低可信車流判斷。");
@@ -1853,6 +1932,128 @@ function clearCctv() {
 
 function clearCctvFrame(message) {
   if (els.cctvFrame) els.cctvFrame.innerHTML = `<div class="cctv-empty">${message}</div>`;
+}
+
+function renderCctvImage(frame, camera) {
+  if (!frame) return;
+  if (!camera?.url) {
+    frame.dataset.cctvId = camera?.id || "";
+    frame.dataset.cctvUrl = "";
+    frame.innerHTML = `<div class="cctv-empty">此監視器未提供可直接顯示的靜態畫面</div>`;
+    return;
+  }
+
+  if (
+    frame.dataset.cctvId === camera.id
+    && frame.dataset.cctvUrl === camera.url
+    && frame.dataset.cctvState !== "failed"
+  ) return;
+
+  frame.dataset.cctvId = camera.id;
+  frame.dataset.cctvUrl = camera.url;
+  frame.dataset.cctvState = "loading";
+  frame.innerHTML = "";
+
+  const isVideo = camera.mediaKind === "video";
+  const image = document.createElement(isVideo ? "video" : "img");
+  image.className = "cctv-image";
+  image.alt = `${camera.road} ${camera.mile} CCTV 即時影像`;
+  if (isVideo) {
+    image.muted = true;
+    image.autoplay = true;
+    image.playsInline = true;
+    image.preload = "auto";
+  } else {
+    image.loading = "eager";
+  }
+  image.addEventListener(isVideo ? "loadeddata" : "load", () => {
+    if (frame.dataset.cctvId === camera.id && frame.dataset.cctvUrl === camera.url) {
+      frame.dataset.cctvState = "ready";
+      if (frame === els.driveAssistCctvFrame) void analyzeDriveCctvFlow(camera, image);
+      if (!isVideo && camera.source === "freeway-1968") {
+        window.setTimeout(() => {
+          const isCurrent = frame.dataset.cctvId === camera.id
+            && frame.dataset.cctvUrl === camera.url
+            && image.isConnected;
+          if (isCurrent) image.src = freshCctvImageUrl(camera.url);
+        }, 10000);
+      }
+    }
+  });
+  image.addEventListener("error", () => handleCctvImageFailure(camera));
+  image.src = !isVideo && camera.source === "freeway-1968"
+    ? freshCctvImageUrl(camera.url)
+    : camera.url;
+  frame.appendChild(image);
+  if (isVideo && typeof image.play === "function") {
+    const playAttempt = image.play();
+    if (playAttempt?.catch) playAttempt.catch(() => {});
+  }
+}
+
+async function analyzeDriveCctvFlow(camera, media) {
+  if (!camera?.id || state.currentCctvId !== camera.id) return;
+  const existing = state.cctvVision;
+  if (existing?.cameraId === camera.id && ["analyzing", "available", "unavailable"].includes(existing.status)) return;
+  if (state.cctvVisionBusy) {
+    window.setTimeout(() => void analyzeDriveCctvFlow(camera, media), 1600);
+    return;
+  }
+
+  const isVideo = media?.tagName === "VIDEO";
+  const mediaReady = isVideo ? media.readyState >= 2 : Boolean(media?.complete && media?.naturalWidth);
+  if (!mediaReady) return;
+
+  state.cctvVisionBusy = true;
+  const laneInfo = resolveDriveLaneInfo();
+  state.cctvVision = { cameraId: camera.id, status: "analyzing", laneInfo };
+  renderDriveAssist();
+
+  try {
+    const first = captureCctvFrame(media);
+    await wait(1200);
+    if (state.currentCctvId !== camera.id) return;
+    const second = captureCctvFrame(media);
+    const result = analyzeLaneMotion(first, second, laneInfo.count);
+    state.cctvVision = {
+      cameraId: camera.id,
+      status: "available",
+      laneInfo,
+      result,
+      analyzedAt: new Date().toISOString(),
+    };
+  } catch {
+    if (state.currentCctvId === camera.id) {
+      state.cctvVision = { cameraId: camera.id, status: "unavailable", laneInfo };
+    }
+  } finally {
+    state.cctvVisionBusy = false;
+    if (state.currentCctvId === camera.id) renderDriveAssist();
+  }
+}
+
+function handleCctvImageFailure(camera) {
+  if (!camera?.id || state.currentCctvId !== camera.id) return;
+  state.failedCctvIds.add(camera.id);
+
+  const point = state.lastDrivePoint || state.lastGuidancePoint || state.trip?.points?.at?.(-1);
+  const direction = point
+    ? inferLiveDirection(point, state.lastGuidancePoint) || inferTripDirection(state.trip)
+    : inferTripDirection(state.trip);
+
+  if (point) {
+    state.currentCctvId = "";
+    state.currentCctv = null;
+    renderNearestCctv(point, direction);
+    if (state.currentCctv && state.currentCctv.id !== camera.id) {
+      setCctvStatus("目前鏡頭畫面無法播放，已自動改用下一支可用鏡頭。");
+      return;
+    }
+  }
+
+  clearCctvFrame("此鏡頭畫面暫時無法播放，附近沒有其他可用影像");
+  renderDriveCctv(null);
+  setCctvStatus("目前鏡頭畫面無法播放，請稍後重新載入。");
 }
 
 function setCctvStatus(message) {
@@ -1954,6 +2155,8 @@ function renderDriveAssist(point = state.lastDrivePoint, direction = null) {
   const speedKmh = point?.speed === null || point?.speed === undefined ? NaN : point.speed * 3.6;
   const speedLimit = estimateSpeedLimit(state.currentCctv || state.currentVd);
   const vdSummary = summarizeVdLive(state.currentVd?.live);
+  const laneInfo = resolveDriveLaneInfo(vdSummary);
+  const vision = currentDriveCctvVision();
   const road = roadContextLabel(state.currentCctv || state.currentVd);
   const cctvDistance = state.currentCctv?.distance;
 
@@ -1982,7 +2185,14 @@ function renderDriveAssist(point = state.lastDrivePoint, direction = null) {
       ? `此為偵測器車道速度，不等同導航指令；請以安全距離與現場標線為準。`
       : `等待 VD 速度或 CCTV 分析後，才提供保守參考。`;
   }
-  renderDriveLaneSpeeds(vdSummary);
+  updateDriveCameraMeta();
+  renderDriveLaneMeta(laneInfo, vision);
+  if (!vdSummary.fastestLane && vision?.status === "available") {
+    const visualBest = vision.result.ranked[0];
+    if (els.driveAssistRecommendation) els.driveAssistRecommendation.textContent = `影像低可信：${visualBest.label}較順`;
+  }
+  if (els.driveAssistDetail) els.driveAssistDetail.textContent = buildDriveAssistDetail(vdSummary, laneInfo, vision);
+  renderDriveLaneSpeeds(vdSummary, vision);
 }
 
 function renderDriveCctv(camera) {
@@ -1991,13 +2201,21 @@ function renderDriveCctv(camera) {
     els.driveAssistCctvFrame.innerHTML = `<div class="cctv-empty">尚未載入監視器畫面</div>`;
     return;
   }
-  els.driveAssistCctvFrame.innerHTML = camera.url
-    ? `<img class="cctv-image" crossorigin="anonymous" src="${camera.url}" alt="${camera.road} ${camera.mile} CCTV 即時影像">`
-    : `<div class="cctv-empty">此監視器未提供公開畫面</div>`;
+  renderCctvImage(els.driveAssistCctvFrame, camera);
 }
 
-function renderDriveLaneSpeeds(summary) {
+function renderDriveLaneSpeeds(summary, vision = currentDriveCctvVision()) {
   if (!els.driveAssistLaneSpeeds) return;
+  if (!summary.lanes.length && vision?.status === "available") {
+    els.driveAssistLaneSpeeds.innerHTML = vision.result.ranked.map((lane, index) => `
+      <div class="is-vision-lane">
+        <strong>${lane.label}</strong>
+        <span>${index === 0 ? "較順" : "參考"}</span>
+        <small>影像流動｜${vision.result.confidence}</small>
+      </div>
+    `).join("");
+    return;
+  }
   if (!summary.lanes.length) {
     els.driveAssistLaneSpeeds.textContent = "VD 車道速度尚未載入";
     return;
@@ -2009,6 +2227,58 @@ function renderDriveLaneSpeeds(summary) {
       <small>占有率 ${lane.occupancy ?? "--"}%</small>
     </div>
   `).join("");
+}
+
+function resolveDriveLaneInfo(summary = summarizeVdLive(state.currentVd?.live)) {
+  const configured = Number.parseInt(state.currentVd?.laneNum, 10);
+  if (configured >= 2 && configured <= 6) return { count: configured, source: "VD 道路資料" };
+  if (summary.lanes.length >= 2 && summary.lanes.length <= 6) return { count: summary.lanes.length, source: "VD 車道資料" };
+  return { count: Math.min(6, Math.max(2, state.roadLaneCount || 3)), source: "手動車道設定" };
+}
+
+function currentDriveCctvVision() {
+  if (!state.currentCctv?.id || state.cctvVision?.cameraId !== state.currentCctv.id) return null;
+  return state.cctvVision;
+}
+
+function formatCctvDistance(distance) {
+  if (typeof distance !== "number") return "--";
+  return distance < 1000 ? `${Math.round(distance)} m` : `${(distance / 1000).toFixed(1)} km`;
+}
+
+function updateDriveCameraMeta() {
+  if (!els.driveAssistCameraMeta) return;
+  const camera = state.currentCctv;
+  if (!camera) {
+    els.driveAssistCameraMeta.textContent = "前方影像｜等待定位或鏡頭資料";
+    return;
+  }
+  const phase = camera.matchType === "held" ? "持續顯示" : "前方目標";
+  const nextRule = camera.distance <= cctvAdvanceSwitchMeters ? "即將切換下一支" : "500 m 前自動換鏡頭";
+  els.driveAssistCameraMeta.textContent = `${phase} ${formatCctvDistance(camera.distance)}｜${nextRule}`;
+}
+
+function renderDriveLaneMeta(laneInfo, vision) {
+  if (!els.driveAssistLaneMeta) return;
+  const visionText = vision?.status === "available"
+    ? `｜影像區塊分析 ${vision.result.confidence}`
+    : vision?.status === "unavailable"
+      ? "｜影像分析未開放"
+      : "｜影像分析待命";
+  els.driveAssistLaneMeta.textContent = `${laneInfo.source}｜${laneInfo.count} 線道${visionText}`;
+}
+
+function buildDriveAssistDetail(vdSummary, laneInfo, vision) {
+  if (vdSummary.fastestLane) {
+    return `${laneInfo.source} ${laneInfo.count} 線道；VD 車道速度僅供路況參考，請以現場標線與安全距離為準。`;
+  }
+  if (vision?.status === "available") {
+    return `CCTV 以 ${laneInfo.count} 個車道區塊比較畫面流動，屬低可信參考，不代表實際車速或變換車道指令。`;
+  }
+  if (vision?.status === "unavailable") {
+    return `${laneInfo.source} ${laneInfo.count} 線道；目前影像可查看，但來源未開放自動讀取畫面。`;
+  }
+  return `${laneInfo.source} ${laneInfo.count} 線道；等待 VD 車道速度或 CCTV 畫面完成分析。`;
 }
 
 function summarizeVdLive(live) {
@@ -2066,7 +2336,7 @@ async function analyzeCctvFlow() {
     const first = captureCctvFrame(image);
     await wait(1400);
     const second = captureCctvFrame(image);
-    const laneCount = Math.min(6, Math.max(2, state.roadLaneCount || 3));
+    const laneCount = resolveDriveLaneInfo().count;
     const result = analyzeLaneMotion(first, second, laneCount);
     renderCctvAnalysis(result);
   } catch (err) {
@@ -2083,17 +2353,23 @@ async function analyzeCctvFlow() {
 
 function captureCctvFrame(image) {
   const width = 240;
-  const height = Math.max(120, Math.round(width * ((image.naturalHeight || 9) / (image.naturalWidth || 16))));
+  const sourceHeight = image.naturalHeight || image.videoHeight || 9;
+  const sourceWidth = image.naturalWidth || image.videoWidth || 16;
+  const height = Math.max(120, Math.round(width * (sourceHeight / sourceWidth)));
   const canvas = document.createElement("canvas");
   canvas.width = width;
   canvas.height = height;
   const ctx = canvas.getContext("2d", { willReadFrequently: true });
-  ctx.drawImage(image, 0, 0, width, height);
-  return {
-    width,
-    height,
-    data: ctx.getImageData(0, 0, width, height).data,
-  };
+  try {
+    ctx.drawImage(image, 0, 0, width, height);
+    return {
+      width,
+      height,
+      data: ctx.getImageData(0, 0, width, height).data,
+    };
+  } catch {
+    throw new Error("影像來源未開放跨網域分析權限；可顯示畫面，但不能進行車流影像分析。");
+  }
 }
 
 function analyzeLaneMotion(first, second, laneCount) {
@@ -2164,6 +2440,16 @@ function renderCctvAnalysis(result) {
   if (!result.ranked.length) {
     setCctvAnalysis("資料不足", "影像可分析範圍太少，暫不排序。", []);
     return;
+  }
+  if (state.currentCctv?.id) {
+    state.cctvVision = {
+      cameraId: state.currentCctv.id,
+      status: "available",
+      laneInfo: resolveDriveLaneInfo(),
+      result,
+      analyzedAt: new Date().toISOString(),
+    };
+    renderDriveAssist();
   }
   const top = result.ranked[0];
   const order = result.ranked.map((lane) => lane.label).join(" > ");

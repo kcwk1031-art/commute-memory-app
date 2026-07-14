@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>通勤路線記憶</title>
-  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="styles.css?v=20260713-drive6">
 </head>
 <body>
   <div class="floating-recorder" id="floatingRecorder" aria-live="polite">
@@ -246,11 +246,18 @@
     <section class="drive-assist-view is-hidden" id="driveAssistView" aria-label="開車一頁式總覽">
       <div class="drive-assist-top">
         <div>
-          <span>目前建議</span>
+          <span>即時建議</span>
           <strong id="driveAssistRecommendation">先照路況</strong>
           <small id="driveAssistDetail">啟動定位後會整合 GPS、歷史紀錄、CCTV 與 VD 速度。</small>
         </div>
         <div class="drive-assist-alert" id="driveAssistAlert">待命</div>
+      </div>
+
+      <div class="drive-assist-camera">
+        <div class="drive-assist-camera-meta" id="driveAssistCameraMeta">前方影像｜等待定位</div>
+        <div class="drive-assist-media" id="driveAssistCctvFrame">
+          <div class="cctv-empty">尚未載入監視器畫面</div>
+        </div>
       </div>
 
       <div class="drive-assist-grid">
@@ -273,9 +280,7 @@
       </div>
 
       <div class="drive-assist-road" id="driveAssistRoad">尚未取得路段資訊</div>
-      <div class="drive-assist-camera" id="driveAssistCctvFrame">
-        <div class="cctv-empty">尚未載入監視器畫面</div>
-      </div>
+      <div class="drive-assist-lane-meta" id="driveAssistLaneMeta">等待 VD 或影像資料判定車道數</div>
       <div class="drive-assist-lanes" id="driveAssistLaneSpeeds">VD 車道速度尚未載入</div>
     </section>
 
@@ -300,6 +305,7 @@
   </main>
 
   <script src="seed-data.js"></script>
-  <script src="app.js"></script>
+  <script src="official-cctv-corridor.js?v=20260714-official1"></script>
+  <script src="app.js?v=20260714-official1"></script>
 </body>
 </html>
