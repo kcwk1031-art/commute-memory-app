@@ -1,6 +1,6 @@
 const TDX_CCTV_URL = "https://tdx.transportdata.tw/api/basic/v2/Road/Traffic/CCTV/Freeway?$format=JSON";
 const CAMERA_CACHE_MS = 6 * 60 * 60 * 1000;
-const SNAPSHOT_REFRESH_MS = 30 * 1000;
+const ROAD_REFRESH_MS = 15 * 1000;
 const MAX_CAMERA_DISTANCE_METERS = 5000;
 const CAMERA_SWITCH_METERS = 500;
 const MAX_LOCATION_ACCURACY_METERS = 150;
@@ -166,12 +166,16 @@ function selectForwardCamera(point, heading) {
   return candidates.find((camera) => camera.distance >= CAMERA_SWITCH_METERS) || candidates[0] || null;
 }
 
-function frameUrl(camera) {
-  if (state.proxyBase) return `${state.proxyBase}/v1/frame?id=${encodeURIComponent(camera.id)}`;
+function streamUrl(camera) {
+  if (state.proxyBase) return `${state.proxyBase}/v1/stream?id=${encodeURIComponent(camera.id)}`;
   return camera.mediaUrl;
 }
 
 function updateImageAge() {
+  if (state.imageLoadedAt && state.proxyBase && el.cameraStage.dataset.state === "ready") {
+    el.cameraAge.textContent = "LIVE";
+    return;
+  }
   if (!state.imageLoadedAt) {
     el.cameraAge.textContent = "--";
     return;
@@ -180,35 +184,34 @@ function updateImageAge() {
   el.cameraAge.textContent = age < 60 ? `${age} 秒前` : `${Math.floor(age / 60)} 分前`;
 }
 
-function loadCameraFrame(camera) {
+function loadCameraStream(camera) {
   const token = ++state.imageToken;
   el.cameraStage.dataset.state = "loading";
-  el.cameraStatus.textContent = "更新影像中";
-  const pendingImage = new Image();
-  pendingImage.decoding = "async";
-  pendingImage.onload = () => {
+  el.cameraStatus.textContent = "連線即時影像中";
+  el.cctvImage.onload = () => {
     if (token !== state.imageToken) return;
-    el.cctvImage.src = pendingImage.src;
     el.cctvImage.hidden = false;
     el.cameraPlaceholder.hidden = true;
     el.cameraOverlay.textContent = `${camera.road} ${formatDirection(camera.direction)}｜${camera.mile || "里程待確認"}`;
     el.cameraOverlay.hidden = false;
     el.cameraStage.dataset.state = "ready";
     state.imageLoadedAt = Date.now();
-    el.cameraStatus.textContent = state.proxyBase ? "快照影像" : "來源串流";
+    el.cameraStatus.textContent = state.proxyBase ? "即時串流" : "來源串流";
     updateImageAge();
   };
-  pendingImage.onerror = () => {
+  el.cctvImage.onerror = () => {
     if (token !== state.imageToken) return;
+    state.imageLoadedAt = 0;
     el.cameraStage.dataset.state = "error";
     if (el.cctvImage.hidden) {
-      setCameraPlaceholder("影像暫不可用", state.proxyBase ? "正在保留鏡頭資訊，稍後自動再試。" : "此鏡頭為 MJPEG，請先設定影像 Proxy。", "error");
+      setCameraPlaceholder("影像暫不可用", state.proxyBase ? "鏡頭串流中斷，系統將自動重新連線。" : "此鏡頭為 MJPEG，請先設定影像 Proxy。", "error");
     }
     el.cameraStatus.textContent = "影像讀取失敗";
     setSource("影像暫不可用", "error");
-    setObservation("影像服務需確認", "已找到前方鏡頭，但目前不能把 MJPEG 安全轉成手機快照。", "warning");
+    setObservation("影像串流暫時中斷", "已保留前方鏡頭；系統會在下一次更新時自動重新連線。", "warning");
   };
-  pendingImage.src = `${frameUrl(camera)}${frameUrl(camera).includes("?") ? "&" : "?"}t=${Date.now()}`;
+  const source = streamUrl(camera);
+  el.cctvImage.src = `${source}${source.includes("?") ? "&" : "?"}t=${Date.now()}`;
 }
 
 async function refreshRoadInformation(point) {
@@ -234,7 +237,7 @@ async function refreshRoadInformation(point) {
     setObservation("前方道路影像", Number.isFinite(heading)
       ? `已選擇 ${formatDistance(selected.distance)} 前方鏡頭；接近 500 公尺後會重新選擇。`
       : "定位已取得，等待移動方向確認後提高鏡頭比對可信度。", "reference");
-    if (changed || !state.imageLoadedAt || Date.now() - state.imageLoadedAt >= SNAPSHOT_REFRESH_MS) loadCameraFrame(selected);
+    if (changed || !state.imageLoadedAt) loadCameraStream(selected);
   } catch (error) {
     setSource("CCTV 清單失敗", "error");
     setObservation("道路資料暫不可用", error.name === "AbortError" ? "讀取逾時，將在下一次定位更新時重試。" : "無法讀取 CCTV 清單，請確認網路後重試。", "error");
@@ -294,9 +297,9 @@ function startDrive() {
   setObservation("正在尋找前方影像", "定位確認後會自動選擇前方候選鏡頭。", "waiting");
   state.watchId = navigator.geolocation.watchPosition(handlePosition, handleLocationError, LOCATION_OPTIONS);
   state.refreshTimer = window.setInterval(() => {
-    if (state.lastPoint && state.currentCamera) loadCameraFrame(state.currentCamera);
+    if (state.lastPoint) void refreshRoadInformation(state.lastPoint);
     updateImageAge();
-  }, SNAPSHOT_REFRESH_MS);
+  }, ROAD_REFRESH_MS);
 }
 
 function stopDrive() {
