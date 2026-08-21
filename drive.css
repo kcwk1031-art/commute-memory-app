@@ -36,7 +36,7 @@ button { cursor: pointer; }
   width: min(100%, 560px);
   min-height: 100dvh;
   margin: 0 auto;
-  padding: max(14px, env(safe-area-inset-top)) 16px calc(104px + env(safe-area-inset-bottom));
+  padding: calc(14px + env(safe-area-inset-top, 0px)) 16px calc(104px + env(safe-area-inset-bottom, 0px));
   display: grid;
   align-content: start;
   gap: 16px;
@@ -310,8 +310,14 @@ button { cursor: pointer; }
   .driver-dock { background: rgba(229, 235, 230, .96); }
 }
 
+@media (display-mode: standalone) {
+  .drive-shell {
+    padding-top: max(58px, calc(14px + env(safe-area-inset-top, 0px)));
+  }
+}
+
 @media (max-height: 720px) {
-  .drive-shell { gap: 11px; padding-top: max(10px, env(safe-area-inset-top)); }
+  .drive-shell { gap: 11px; padding-top: max(58px, calc(10px + env(safe-area-inset-top, 0px))); }
   .camera-stage { max-height: 205px; }
   .metric-grid article { min-height: 76px; }
   .observation { min-height: 62px; }

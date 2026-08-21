@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0b1916">
+  <title>道路駕駛 - 串流播放預覽</title>
+  <style>
+    :root {
+      --ink: #15231f;
+      --muted: #68736f;
+      --canvas: #f2f5f2;
+      --surface: #ffffff;
+      --line: #d9e2dc;
+      --teal: #087166;
+      --teal-soft: #e3f3ee;
+      --amber: #aa6500;
+      --amber-soft: #fff1d8;
+      --red: #b33a31;
+      --night: #0b1916;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-width: 320px;
+      color: var(--ink);
+      background: #e1e8e3;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    main {
+      width: min(100%, 560px);
+      min-height: 100dvh;
+      margin: 0 auto;
+      padding: max(24px, env(safe-area-inset-top)) 16px calc(104px + env(safe-area-inset-bottom));
+      background: var(--canvas);
+    }
+    .topbar, .route-row, .video-meta, .metrics, .notice { display: flex; }
+    .topbar { align-items: start; justify-content: space-between; gap: 16px; }
+    .eyebrow, .caption { margin: 0; color: var(--muted); font-size: 12px; font-weight: 800; }
+    h1 { margin: 3px 0 0; font-size: 24px; line-height: 1.15; letter-spacing: 0; }
+    .demo-pill, .live-pill, .source-pill { display: inline-flex; align-items: center; gap: 6px; border-radius: 999px; font-size: 12px; font-weight: 800; white-space: nowrap; }
+    .demo-pill { padding: 7px 9px; background: var(--amber-soft); color: var(--amber); }
+    .route-row { align-items: center; gap: 10px; margin: 18px 0 12px; padding: 12px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+    .route-icon { display: grid; width: 32px; height: 32px; place-items: center; border-radius: 8px; background: var(--teal-soft); color: var(--teal); font-weight: 900; }
+    .route-copy { min-width: 0; display: grid; gap: 3px; }
+    .route-copy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 15px; }
+    .route-copy span { color: var(--muted); font-size: 13px; font-weight: 650; }
+    .route-status { margin-left: auto; color: var(--teal); font-size: 13px; font-weight: 800; }
+    .video-shell { position: relative; overflow: hidden; aspect-ratio: 16 / 9; border: 1px solid #203630; border-radius: 8px; background: var(--night); box-shadow: 0 12px 24px rgba(13, 31, 23, .18); }
+    #previewStream { display: block; width: 100%; height: 100%; object-fit: contain; background: var(--night); }
+    .video-top, .video-bottom { position: absolute; right: 10px; left: 10px; display: flex; align-items: center; justify-content: space-between; gap: 8px; pointer-events: none; }
+    .video-top { top: 10px; }
+    .video-bottom { bottom: 10px; }
+    .live-pill { padding: 6px 8px; background: rgba(7, 25, 21, .86); color: #effbf6; }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: #33d19b; box-shadow: 0 0 0 3px rgba(51, 209, 155, .2); }
+    .stream-label { max-width: 65%; overflow: hidden; padding: 6px 8px; border-radius: 4px; background: rgba(7, 25, 21, .82); color: #eef9f3; font-size: 12px; font-weight: 750; text-overflow: ellipsis; white-space: nowrap; }
+    .buffer-status { padding: 6px 8px; border-radius: 4px; background: rgba(7, 25, 21, .82); color: #d2e4db; font-size: 12px; font-weight: 750; }
+    .video-meta { align-items: center; justify-content: space-between; gap: 12px; min-height: 54px; padding: 10px 0; }
+    .video-meta strong { font-size: 14px; }
+    .video-meta span { color: var(--muted); font-size: 12px; font-weight: 700; }
+    .source-pill { padding: 6px 8px; background: var(--teal-soft); color: var(--teal); }
+    .decision { margin-top: 10px; padding: 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+    .decision-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    .decision h2 { margin: 3px 0 0; font-size: 22px; letter-spacing: 0; }
+    .decision-badge { padding: 7px 8px; border-radius: 6px; background: var(--teal-soft); color: var(--teal); font-size: 13px; font-weight: 850; }
+    .decision p { margin: 10px 0 0; color: var(--muted); font-size: 14px; line-height: 1.45; }
+    .metrics { gap: 8px; margin-top: 10px; }
+    .metrics article { flex: 1; min-width: 0; padding: 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+    .metrics span, .metrics small { display: block; color: var(--muted); font-size: 11px; font-weight: 700; }
+    .metrics strong { display: block; margin: 4px 0 2px; font-size: 23px; line-height: 1; }
+    .notice { align-items: start; gap: 10px; margin-top: 18px; padding: 12px 0 12px 12px; border-left: 4px solid #df9b26; }
+    .notice strong { display: block; font-size: 14px; }
+    .notice small { display: block; margin-top: 4px; color: var(--muted); font-size: 13px; line-height: 1.45; }
+    .bottom-status { position: fixed; right: 0; bottom: 0; left: 0; display: grid; justify-items: center; border-top: 1px solid var(--line); background: rgba(242, 245, 242, .96); backdrop-filter: blur(10px); }
+    .bottom-status > div { width: min(100%, 560px); padding: 13px 16px max(13px, env(safe-area-inset-bottom)); color: var(--muted); font-size: 13px; font-weight: 700; }
+    .bottom-status b { color: var(--ink); }
+    @media (min-width: 561px) { main { box-shadow: 0 0 0 1px rgba(18, 35, 31, .08); } }
+  </style>
+</head>
+<body>
+  <main>
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">道路駕駛</p>
+        <h1>即時串流駕駛畫面</h1>
+      </div>
+      <span class="demo-pill">介面預覽</span>
+    </header>
+
+    <section class="route-row" aria-label="目前行駛路線">
+      <span class="route-icon">3</span>
+      <div class="route-copy">
+        <strong>國道 3 號 北向</strong>
+        <span>安坑交流道 → 新店交流道</span>
+      </div>
+      <span class="route-status">維持路線</span>
+    </section>
+
+    <section aria-label="前方即時道路影像">
+      <div class="video-shell">
+        <img id="previewStream" src="https://cctvn.freeway.gov.tw/abs2mjpg/bmjpg?camera=30001" alt="國道 CCTV 串流介面示意">
+        <div class="video-top">
+          <span class="live-pill"><i class="dot"></i><span id="liveText">連線中</span></span>
+          <span class="stream-label">國 3 北向｜30K+149</span>
+        </div>
+        <div class="video-bottom">
+          <span class="buffer-status" id="bufferText">影像緩衝中</span>
+          <span class="buffer-status">下一支預載 1.2 km</span>
+        </div>
+      </div>
+      <div class="video-meta">
+        <div>
+          <p class="caption">前方即時影像</p>
+          <strong>安坑交流道 → 新店交流道</strong>
+        </div>
+        <span class="source-pill">MJPEG 預覽</span>
+      </div>
+    </section>
+
+    <section class="decision" aria-label="前方路況決策">
+      <div class="decision-top">
+        <div>
+          <p class="caption">前方 5 公里</p>
+          <h2>2.4 km 後車流偏慢</h2>
+        </div>
+        <span class="decision-badge">官方 VD</span>
+      </div>
+      <p>國 3 北向 31K–33K 平均 42 km/h；目前尚無明顯更快的可行替代走廊。</p>
+    </section>
+
+    <section class="metrics" aria-label="即時指標">
+      <article><span>GPS 車速</span><strong>86</strong><small>km/h</small></article>
+      <article><span>前方鏡頭</span><strong>1.2</strong><small>km</small></article>
+      <article><span>資料時間</span><strong>12</strong><small>秒前</small></article>
+    </section>
+
+    <section class="notice">
+      <div>
+        <strong>展示模式</strong>
+        <small>此頁展示連續播放器與預載切鏡頭的呈現方式。正式版將由影音服務輸出 HLS，並在影像停滯時清楚顯示重連狀態。</small>
+      </div>
+    </section>
+  </main>
+
+  <footer class="bottom-status"><div><b id="footerStatus">測試影像來源連線中</b>　正式行駛模式不放廣告、不要求操作。</div></footer>
+
+  <script>
+    const stream = document.querySelector('#previewStream');
+    const liveText = document.querySelector('#liveText');
+    const bufferText = document.querySelector('#bufferText');
+    const footerStatus = document.querySelector('#footerStatus');
+    let loadedAt = 0;
+
+    stream.addEventListener('load', () => {
+      loadedAt = Date.now();
+      liveText.textContent = '即時來源';
+      bufferText.textContent = '持續更新中';
+      footerStatus.textContent = '測試影像來源已連線';
+    });
+
+    stream.addEventListener('error', () => {
+      liveText.textContent = '來源暫不可用';
+      bufferText.textContent = '等待重新連線';
+      footerStatus.textContent = '測試影像無法載入，正式版會改用 HLS 自動重連';
+    });
+
+    window.setInterval(() => {
+      if (!loadedAt) return;
+      const seconds = Math.floor((Date.now() - loadedAt) / 1000);
+      if (seconds >= 10) bufferText.textContent = `最後確認 ${seconds} 秒前`;
+    }, 1000);
+  </script>
+</body>
+</html>
