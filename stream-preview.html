@@ -48,7 +48,9 @@
     .route-copy span { color: var(--muted); font-size: 13px; font-weight: 650; }
     .route-status { margin-left: auto; color: var(--teal); font-size: 13px; font-weight: 800; }
     .video-shell { position: relative; overflow: hidden; aspect-ratio: 16 / 9; border: 1px solid #203630; border-radius: 8px; background: var(--night); box-shadow: 0 12px 24px rgba(13, 31, 23, .18); }
-    #previewStream { display: block; width: 100%; height: 100%; object-fit: contain; background: var(--night); }
+    .fallback-frame, #previewStream { position: absolute; inset: 0; display: block; width: 100%; height: 100%; object-fit: contain; background: var(--night); }
+    #previewStream { opacity: 0; transition: opacity .18s ease; }
+    .video-shell.is-live #previewStream { opacity: 1; }
     .video-top, .video-bottom { position: absolute; right: 10px; left: 10px; display: flex; align-items: center; justify-content: space-between; gap: 8px; pointer-events: none; }
     .video-top { top: 10px; }
     .video-bottom { bottom: 10px; }
@@ -99,13 +101,14 @@
 
     <section aria-label="前方即時道路影像">
       <div class="video-shell">
+        <img class="fallback-frame" src="camera-30001-frame.jpg" alt="國道 CCTV 最近畫面截圖">
         <img id="previewStream" src="https://cctvn.freeway.gov.tw/abs2mjpg/bmjpg?camera=30001" alt="國道 CCTV 串流介面示意">
         <div class="video-top">
           <span class="live-pill"><i class="dot"></i><span id="liveText">連線中</span></span>
           <span class="stream-label">國 3 北向｜30K+149</span>
         </div>
         <div class="video-bottom">
-          <span class="buffer-status" id="bufferText">影像緩衝中</span>
+          <span class="buffer-status" id="bufferText">正在連線，先顯示最近截圖</span>
           <span class="buffer-status">下一支預載 1.2 km</span>
         </div>
       </div>
@@ -154,22 +157,18 @@
 
     stream.addEventListener('load', () => {
       loadedAt = Date.now();
+      stream.closest('.video-shell').classList.add('is-live');
       liveText.textContent = '即時來源';
-      bufferText.textContent = '持續更新中';
+      bufferText.textContent = '即時串流已連線';
       footerStatus.textContent = '測試影像來源已連線';
     });
 
     stream.addEventListener('error', () => {
+      stream.closest('.video-shell').classList.remove('is-live');
       liveText.textContent = '來源暫不可用';
-      bufferText.textContent = '等待重新連線';
-      footerStatus.textContent = '測試影像無法載入，正式版會改用 HLS 自動重連';
+      bufferText.textContent = '顯示最近截圖';
+      footerStatus.textContent = '即時來源暫不可用，現正顯示最近截圖';
     });
-
-    window.setInterval(() => {
-      if (!loadedAt) return;
-      const seconds = Math.floor((Date.now() - loadedAt) / 1000);
-      if (seconds >= 10) bufferText.textContent = `最後確認 ${seconds} 秒前`;
-    }, 1000);
   </script>
 </body>
 </html>
