@@ -41,6 +41,7 @@ const state = {
   cctvs: [],
   cctvsLoadedAt: 0,
   currentCamera: null,
+  displayedCamera: null,
   previousPoint: null,
   lastPoint: null,
   imageLoadedAt: 0,
@@ -189,6 +190,12 @@ function streamUrl(camera) {
   return camera.mediaUrl;
 }
 
+function renderCameraContext(camera) {
+  el.roadLabel.textContent = `${camera.road} ${formatDirection(camera.direction)}｜${camera.mile || "里程待確認"}`;
+  el.roadDetail.textContent = camera.section || "附近前方國道 CCTV";
+  el.cameraDistance.textContent = formatDistance(camera.distance);
+}
+
 function updateImageAge() {
   if (state.imageLoadedAt && (state.proxyBase || state.relayBase) && el.cameraStage.dataset.state === "ready") {
     // MJPEG <img> does not expose a per-frame heartbeat, so do not claim the feed is live.
@@ -227,6 +234,8 @@ function loadCameraStream(camera, isReconnect = false) {
     state.reconnectAttempts = 0;
     el.cctvImage.hidden = false;
     el.cameraPlaceholder.hidden = true;
+    state.displayedCamera = camera;
+    renderCameraContext(camera);
     el.cameraOverlay.textContent = `${camera.road} ${formatDirection(camera.direction)}｜${camera.mile || "里程待確認"}`;
     el.cameraOverlay.hidden = false;
     el.cameraStage.dataset.state = "ready";
@@ -289,9 +298,7 @@ async function refreshRoadInformation(point) {
     }
     const changed = selected.id !== state.currentCamera?.id;
     state.currentCamera = selected;
-    el.roadLabel.textContent = `${selected.road} ${formatDirection(selected.direction)}｜${selected.mile || "里程待確認"}`;
-    el.roadDetail.textContent = selected.section || "附近前方國道 CCTV";
-    el.cameraDistance.textContent = formatDistance(selected.distance);
+    if (!state.displayedCamera || state.displayedCamera.id === selected.id) renderCameraContext(selected);
     setSource(Number.isFinite(heading) ? "影像可參考" : "方向待確認", Number.isFinite(heading) ? "reference" : "warning");
     setObservation("前方道路影像", Number.isFinite(heading)
       ? `已選擇 ${formatDistance(selected.distance)} 前方鏡頭；接近 500 公尺後會重新選擇。`
