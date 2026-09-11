@@ -166,6 +166,10 @@ button { cursor: pointer; }
   background: var(--camera);
 }
 
+#cctvImage[hidden],
+.camera-placeholder[hidden],
+.camera-overlay[hidden] { display: none !important; }
+
 .camera-placeholder {
   position: absolute;
   inset: 0;

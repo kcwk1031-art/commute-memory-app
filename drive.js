@@ -206,14 +206,22 @@ function updateImageAge() {
 function loadCameraStream(camera, isReconnect = false) {
   if (!isReconnect) state.reconnectAttempts = 0;
   const token = ++state.imageToken;
-  state.imageLoadedAt = 0;
-  el.cameraStage.dataset.state = "loading";
-  el.cameraStatus.textContent = "連線即時影像中";
-  el.cctvImage.hidden = true;
-  el.cameraOverlay.hidden = true;
-  el.cameraPlaceholder.hidden = false;
-  el.cameraPlaceholder.querySelector("strong").textContent = "正在切換前方影像";
-  el.cameraPlaceholder.querySelector("small").textContent = "確認鏡頭連線後才會顯示畫面。";
+  const hadVisibleImage = !el.cctvImage.hidden && state.imageLoadedAt > 0;
+  if (hadVisibleImage) {
+    // Keep the last confirmed frame visible while a new camera is connecting.
+    el.cameraStage.dataset.state = "ready";
+    el.cameraStatus.textContent = "切換影像中";
+    el.cameraPlaceholder.hidden = true;
+  } else {
+    state.imageLoadedAt = 0;
+    el.cameraStage.dataset.state = "loading";
+    el.cameraStatus.textContent = "連線即時影像中";
+    el.cctvImage.hidden = true;
+    el.cameraOverlay.hidden = true;
+    el.cameraPlaceholder.hidden = false;
+    el.cameraPlaceholder.querySelector("strong").textContent = "正在連線前方影像";
+    el.cameraPlaceholder.querySelector("small").textContent = "確認鏡頭連線後才會顯示畫面。";
+  }
   el.cctvImage.onload = () => {
     if (token !== state.imageToken) return;
     state.reconnectAttempts = 0;
@@ -228,24 +236,36 @@ function loadCameraStream(camera, isReconnect = false) {
   };
   el.cctvImage.onerror = () => {
     if (token !== state.imageToken) return;
-    state.imageLoadedAt = 0;
+    if (!hadVisibleImage) state.imageLoadedAt = 0;
     if (state.active && state.currentCamera?.id === camera.id && state.reconnectAttempts < 2) {
       state.reconnectAttempts += 1;
       const delay = state.reconnectAttempts * 3000;
-      el.cameraStage.dataset.state = "loading";
-      el.cameraPlaceholder.hidden = false;
-      el.cameraPlaceholder.querySelector("strong").textContent = "正在重新連線影像";
-      el.cameraPlaceholder.querySelector("small").textContent = `第 ${state.reconnectAttempts} 次重試，確認串流是否恢復。`;
-      el.cameraStatus.textContent = "影像重新連線中";
+      if (hadVisibleImage) {
+        el.cameraStage.dataset.state = "ready";
+        el.cameraPlaceholder.hidden = true;
+        el.cameraStatus.textContent = "保留畫面並重新連線";
+      } else {
+        el.cameraStage.dataset.state = "loading";
+        el.cameraPlaceholder.hidden = false;
+        el.cameraPlaceholder.querySelector("strong").textContent = "正在重新連線影像";
+        el.cameraPlaceholder.querySelector("small").textContent = `第 ${state.reconnectAttempts} 次重試，確認串流是否恢復。`;
+        el.cameraStatus.textContent = "影像重新連線中";
+      }
       window.clearTimeout(state.reconnectTimer);
       state.reconnectTimer = window.setTimeout(() => {
         if (state.active && state.currentCamera?.id === camera.id) loadCameraStream(camera, true);
       }, delay);
       return;
     }
-    el.cameraStage.dataset.state = "error";
-    setCameraPlaceholder("影像暫不可用", state.relayBase ? "Relay 無法取得此鏡頭，系統將在下一次更新時重試。" : "此鏡頭為 MJPEG，請先設定影像 Relay。", "error");
-    el.cameraStatus.textContent = "影像讀取失敗";
+    if (hadVisibleImage) {
+      el.cameraStage.dataset.state = "ready";
+      el.cameraPlaceholder.hidden = true;
+      el.cameraStatus.textContent = "影像更新失敗";
+    } else {
+      el.cameraStage.dataset.state = "error";
+      setCameraPlaceholder("影像暫不可用", state.relayBase ? "Relay 無法取得此鏡頭，系統將在下一次更新時重試。" : "此鏡頭為 MJPEG，請先設定影像 Relay。", "error");
+      el.cameraStatus.textContent = "影像讀取失敗";
+    }
     setSource("影像暫不可用", "error");
     setObservation("影像串流暫時中斷", "已保留前方鏡頭；系統會在下一次更新時自動重新連線。", "warning");
   };
