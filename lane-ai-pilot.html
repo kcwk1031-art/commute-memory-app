@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>道路駕駛 - AI 車流試點</title>
+  <style>
+    :root { --ink:#10251f; --muted:#63736d; --canvas:#f2f5f2; --line:#d7e0da; --teal:#087166; --teal-soft:#e2f3ed; --amber:#a86000; --amber-soft:#fff1d7; --night:#071c18; --red:#ae382f; }
+    * { box-sizing:border-box; }
+    body { margin:0; min-width:320px; background:#dde6df; color:var(--ink); font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+    main { width:min(100%,560px); min-height:100dvh; margin:auto; padding:max(20px,env(safe-area-inset-top)) 16px calc(36px + env(safe-area-inset-bottom)); background:var(--canvas); }
+    header, .summary, .metric-grid, .camera-head, .meta { display:flex; }
+    header { align-items:flex-start; justify-content:space-between; padding-bottom:16px; border-bottom:1px solid var(--line); }
+    .eyebrow { margin:0; color:var(--muted); font-size:12px; font-weight:800; }
+    h1 { margin:3px 0 0; font-size:25px; line-height:1.15; }
+    h2 { margin:3px 0 0; font-size:17px; }
+    .badge { padding:7px 9px; border-radius:999px; color:var(--amber); background:var(--amber-soft); font-size:12px; font-weight:850; white-space:nowrap; }
+    .meta { align-items:center; gap:10px; padding:14px 0; border-bottom:1px solid var(--line); }
+    .road { display:grid; width:34px; height:34px; place-items:center; border-radius:8px; background:var(--teal-soft); color:var(--teal); font-weight:900; }
+    .meta div { min-width:0; flex:1; }
+    .meta strong, .meta small { display:block; }
+    .meta strong { font-size:16px; }
+    .meta small { margin-top:3px; color:var(--muted); font-size:13px; font-weight:700; }
+    .camera { margin-top:14px; overflow:hidden; border:1px solid #173b33; border-radius:8px; background:var(--night); box-shadow:0 12px 24px rgba(7,28,24,.14); }
+    .camera-head { align-items:center; justify-content:space-between; gap:8px; padding:9px 10px; color:#eaf9f2; font-size:12px; font-weight:800; }
+    .live { display:inline-flex; align-items:center; gap:6px; }
+    .dot { width:8px; height:8px; border-radius:50%; background:#29cf99; box-shadow:0 0 0 3px rgba(41,207,153,.18); }
+    .stage { position:relative; aspect-ratio:4 / 3; overflow:hidden; border-top:1px solid rgba(255,255,255,.12); border-bottom:1px solid rgba(255,255,255,.12); background:#0a1714; }
+    #camera, #overlay { width:100%; height:100%; object-fit:contain; display:block; }
+    #overlay { position:absolute; inset:0; pointer-events:none; }
+    .camera-foot { padding:9px 10px; color:#d0e3da; font-size:12px; font-weight:750; }
+    .section { margin-top:16px; }
+    .section-title { display:flex; justify-content:space-between; align-items:end; gap:12px; }
+    .source { padding:6px 8px; border-radius:999px; background:var(--teal-soft); color:var(--teal); font-size:12px; font-weight:850; white-space:nowrap; }
+    .summary { align-items:flex-start; justify-content:space-between; gap:12px; margin-top:10px; padding:14px; border:1px solid var(--line); border-radius:8px; background:#fff; }
+    .summary strong { display:block; margin-top:4px; font-size:22px; }
+    .summary p { margin:8px 0 0; color:var(--muted); font-size:14px; line-height:1.5; }
+    .status { padding:7px 8px; border-radius:6px; background:var(--amber-soft); color:var(--amber); font-size:12px; font-weight:850; white-space:nowrap; }
+    .metric-grid { gap:8px; margin-top:10px; }
+    .metric { flex:1; min-width:0; padding:11px; border:1px solid var(--line); border-radius:8px; background:#fff; }
+    .metric span, .metric small { display:block; color:var(--muted); font-size:11px; font-weight:750; }
+    .metric strong { display:block; margin:4px 0 2px; font-size:22px; line-height:1; }
+    .notice { margin-top:16px; padding:12px 0 12px 12px; border-left:4px solid #df9b26; }
+    .notice strong { display:block; font-size:14px; }
+    .notice p { margin:4px 0 0; color:var(--muted); font-size:13px; line-height:1.45; }
+    .controls { display:flex; justify-content:flex-end; margin-top:10px; }
+    button { min-height:38px; padding:8px 10px; border:1px solid var(--line); border-radius:6px; background:#fff; color:var(--ink); font:inherit; font-size:13px; font-weight:800; }
+    button[aria-pressed="true"] { border-color:var(--teal); background:var(--teal-soft); color:var(--teal); }
+    @media (min-width:561px) { main { box-shadow:0 0 0 1px rgba(18,35,31,.08); } }
+  </style>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3/dist/coco-ssd.min.js"></script>
+</head>
+<body>
+  <main>
+    <header><div><p class="eyebrow">道路駕駛</p><h1>AI 車流試點</h1></div><span class="badge">研發測試</span></header>
+    <section class="meta"><span class="road">3</span><div><strong>國道 3 號南向｜0K+180</strong><small>固定鏡頭 30001｜基金交流道路段</small></div></section>
+    <section class="camera" aria-label="官方即時 CCTV 影像">
+      <div class="camera-head"><span class="live"><i class="dot"></i><span id="streamStatus">正在連線</span></span><span id="frameTime">--</span></div>
+      <div class="stage"><img id="camera" crossorigin="anonymous" alt="國道 3 號南向即時 CCTV 影像"><canvas id="overlay" hidden></canvas></div>
+      <div class="camera-foot">只使用官方公開畫面作研發測試；畫面異常時不產生車道結論。</div>
+    </section>
+    <section class="section"><div class="section-title"><div><p class="eyebrow">模型輸出</p><h2>車流偵測結果</h2></div><span class="source" id="modelStatus">模型載入中</span></div>
+      <div class="summary"><div><p class="eyebrow">目前影像</p><strong id="vehicleResult">等待可分析畫面</strong><p id="decisionDetail">載入車輛偵測模型後，每 5 秒分析一張實際畫面。</p></div><span class="status" id="confidence">未判讀</span></div>
+      <div class="metric-grid"><article class="metric"><span>偵測車輛</span><strong id="vehicleCount">--</strong><small>汽車／貨車／機車</small></article><article class="metric"><span>主線車道數</span><strong>--</strong><small>待鏡頭校正</small></article><article class="metric"><span>每車道速度</span><strong>--</strong><small>不可直接推估</small></article></div>
+      <div class="controls"><button id="toggleOverlay" type="button" aria-pressed="false">顯示研發檢測框</button></div>
+    </section>
+    <section class="notice"><strong>測試門檻</strong><p>此頁只驗證 AI 是否能從即時畫面辨識車輛。主線範圍、車道數與每車道速度，必須先完成鏡頭幾何校正、連續影格追蹤及人工準確率驗證，否則不會顯示為駕駛建議。</p></section>
+  </main>
+  <script>
+    const relayBase = new URLSearchParams(location.search).get("relay") || "https://commute-cctv-relay.onrender.com";
+    const cameraId = "30001";
+    const detectorClasses = new Set(["car", "truck", "bus", "motorcycle"]);
+    const camera = document.querySelector("#camera");
+    const overlay = document.querySelector("#overlay");
+    const context = overlay.getContext("2d");
+    const streamStatus = document.querySelector("#streamStatus");
+    const frameTime = document.querySelector("#frameTime");
+    const modelStatus = document.querySelector("#modelStatus");
+    const vehicleResult = document.querySelector("#vehicleResult");
+    const vehicleCount = document.querySelector("#vehicleCount");
+    const confidence = document.querySelector("#confidence");
+    const decisionDetail = document.querySelector("#decisionDetail");
+    const toggleOverlay = document.querySelector("#toggleOverlay");
+    let model;
+    let analyzing = false;
+    let showOverlay = false;
+
+    function setStreamSource() {
+      camera.src = `${relayBase}/snapshot/${cameraId}?t=${Date.now()}`;
+    }
+
+    function drawPredictions(predictions) {
+      overlay.width = camera.naturalWidth;
+      overlay.height = camera.naturalHeight;
+      context.clearRect(0, 0, overlay.width, overlay.height);
+      context.font = "bold 13px system-ui";
+      for (const prediction of predictions) {
+        const [x, y, width, height] = prediction.bbox;
+        context.strokeStyle = "#23d3a2";
+        context.lineWidth = 2;
+        context.strokeRect(x, y, width, height);
+        const text = `${prediction.class} ${Math.round(prediction.score * 100)}%`;
+        context.fillStyle = "#23d3a2";
+        context.fillRect(x, Math.max(0, y - 18), context.measureText(text).width + 8, 18);
+        context.fillStyle = "#042118";
+        context.fillText(text, x + 4, Math.max(13, y - 5));
+      }
+    }
+
+    async function analyzeFrame() {
+      if (!model || analyzing || !camera.naturalWidth) return;
+      analyzing = true;
+      try {
+        const predictions = (await model.detect(camera, 12, 0.4)).filter((item) => detectorClasses.has(item.class));
+        drawPredictions(predictions);
+        vehicleCount.textContent = String(predictions.length);
+        vehicleResult.textContent = predictions.length ? `辨識到 ${predictions.length} 輛車輛` : "未辨識到可確認車輛";
+        confidence.textContent = predictions.length ? "影像可分析" : "低信心";
+        decisionDetail.textContent = predictions.length
+          ? "已完成單張影像的車輛偵測；尚未完成車道分群或速度推算。"
+          : "此畫面未取得足夠車輛特徵，暫不產生車流或車道結論。";
+        frameTime.textContent = `分析 ${new Date().toLocaleTimeString("zh-TW", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}`;
+      } catch (_) {
+        confidence.textContent = "分析失敗";
+        decisionDetail.textContent = "此張畫面無法完成模型分析，系統不輸出車道結論。";
+      } finally {
+        analyzing = false;
+      }
+    }
+
+    camera.addEventListener("load", () => {
+      streamStatus.textContent = "官方快照已更新";
+      void analyzeFrame();
+    });
+    camera.addEventListener("error", () => {
+      streamStatus.textContent = "影像重新連線中";
+      window.setTimeout(setStreamSource, 5000);
+    });
+    toggleOverlay.addEventListener("click", () => {
+      showOverlay = !showOverlay;
+      overlay.hidden = !showOverlay;
+      toggleOverlay.setAttribute("aria-pressed", String(showOverlay));
+      toggleOverlay.textContent = showOverlay ? "隱藏研發檢測框" : "顯示研發檢測框";
+    });
+
+    (async () => {
+      try {
+        model = await cocoSsd.load({ base: "lite_mobilenet_v2" });
+        modelStatus.textContent = "車輛模型已就緒";
+        setStreamSource();
+        window.setInterval(setStreamSource, 7000);
+      } catch (_) {
+        modelStatus.textContent = "模型載入失敗";
+        decisionDetail.textContent = "請確認網路後重新載入；未載入模型時不輸出任何判讀。";
+      }
+    })();
+  </script>
+</body>
+</html>
