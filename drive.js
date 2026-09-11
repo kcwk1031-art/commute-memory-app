@@ -6,6 +6,7 @@ const CAMERA_SWITCH_METERS = 500;
 const MAX_LOCATION_ACCURACY_METERS = 150;
 const LOCATION_OPTIONS = { enableHighAccuracy: true, maximumAge: 1000, timeout: 12000 };
 const proxyStorageKey = "commute-cctv-proxy-base-v1";
+const relayStorageKey = "commute-cctv-relay-base-v1";
 
 const el = {
   locationState: document.querySelector("#locationState"),
@@ -30,6 +31,7 @@ const el = {
   openSettings: document.querySelector("#openSettings"),
   settingsDialog: document.querySelector("#settingsDialog"),
   proxyEndpoint: document.querySelector("#proxyEndpoint"),
+  relayEndpoint: document.querySelector("#relayEndpoint"),
   saveSettings: document.querySelector("#saveSettings"),
 };
 
@@ -45,11 +47,24 @@ const state = {
   refreshTimer: null,
   imageToken: 0,
   proxyBase: normalizeProxyBase(localStorage.getItem(proxyStorageKey) || window.DRIVE_CONFIG?.cctvProxyBase || ""),
+  relayBase: normalizeRelayBase(localStorage.getItem(relayStorageKey) || window.DRIVE_CONFIG?.cctvRelayBase || ""),
 };
 
 function normalizeProxyBase(value) {
   const base = String(value || "").trim().replace(/\/$/, "");
   return /^https:\/\//i.test(base) ? base : "";
+}
+
+function normalizeRelayBase(value) {
+  const base = String(value || "").trim().replace(/\/$/, "");
+  try {
+    const url = new URL(base);
+    if (url.protocol === "https:") return base;
+    if (url.protocol === "http:" && ["localhost", "127.0.0.1", "::1"].includes(url.hostname)) return base;
+  } catch (_) {
+    // Invalid values are treated as not configured.
+  }
+  return "";
 }
 
 function setSource(label, level = "waiting") {
@@ -167,13 +182,15 @@ function selectForwardCamera(point, heading) {
 }
 
 function streamUrl(camera) {
+  if (state.relayBase) return `${state.relayBase}/mjpeg/${encodeURIComponent(camera.id)}`;
   if (state.proxyBase) return `${state.proxyBase}/v1/stream?id=${encodeURIComponent(camera.id)}`;
   return camera.mediaUrl;
 }
 
 function updateImageAge() {
-  if (state.imageLoadedAt && state.proxyBase && el.cameraStage.dataset.state === "ready") {
-    el.cameraAge.textContent = "LIVE";
+  if (state.imageLoadedAt && (state.proxyBase || state.relayBase) && el.cameraStage.dataset.state === "ready") {
+    // MJPEG <img> does not expose a per-frame heartbeat, so do not claim the feed is live.
+    el.cameraAge.textContent = "串流已連線";
     return;
   }
   if (!state.imageLoadedAt) {
@@ -186,8 +203,14 @@ function updateImageAge() {
 
 function loadCameraStream(camera) {
   const token = ++state.imageToken;
+  state.imageLoadedAt = 0;
   el.cameraStage.dataset.state = "loading";
   el.cameraStatus.textContent = "連線即時影像中";
+  el.cctvImage.hidden = true;
+  el.cameraOverlay.hidden = true;
+  el.cameraPlaceholder.hidden = false;
+  el.cameraPlaceholder.querySelector("strong").textContent = "正在切換前方影像";
+  el.cameraPlaceholder.querySelector("small").textContent = "確認鏡頭連線後才會顯示畫面。";
   el.cctvImage.onload = () => {
     if (token !== state.imageToken) return;
     el.cctvImage.hidden = false;
@@ -196,16 +219,14 @@ function loadCameraStream(camera) {
     el.cameraOverlay.hidden = false;
     el.cameraStage.dataset.state = "ready";
     state.imageLoadedAt = Date.now();
-    el.cameraStatus.textContent = state.proxyBase ? "即時串流" : "來源串流";
+    el.cameraStatus.textContent = state.relayBase ? "即時串流" : "來源串流";
     updateImageAge();
   };
   el.cctvImage.onerror = () => {
     if (token !== state.imageToken) return;
     state.imageLoadedAt = 0;
     el.cameraStage.dataset.state = "error";
-    if (el.cctvImage.hidden) {
-      setCameraPlaceholder("影像暫不可用", state.proxyBase ? "鏡頭串流中斷，系統將自動重新連線。" : "此鏡頭為 MJPEG，請先設定影像 Proxy。", "error");
-    }
+    setCameraPlaceholder("影像暫不可用", state.relayBase ? "Relay 無法取得此鏡頭，系統將在下一次更新時重試。" : "此鏡頭為 MJPEG，請先設定影像 Relay。", "error");
     el.cameraStatus.textContent = "影像讀取失敗";
     setSource("影像暫不可用", "error");
     setObservation("影像串流暫時中斷", "已保留前方鏡頭；系統會在下一次更新時自動重新連線。", "warning");
@@ -308,6 +329,14 @@ function stopDrive() {
   state.watchId = null;
   state.refreshTimer = null;
   state.active = false;
+  state.imageToken += 1;
+  state.imageLoadedAt = 0;
+  el.cctvImage.onload = null;
+  el.cctvImage.onerror = null;
+  el.cctvImage.removeAttribute("src");
+  setCameraPlaceholder("即時道路資訊已停止", "再次啟動後，會重新確認定位與前方鏡頭。", "waiting");
+  el.cameraStatus.textContent = "影像待命";
+  el.cameraAge.textContent = "--";
   el.startDrive.hidden = false;
   el.stopDrive.hidden = true;
   el.locationState.textContent = "定位已停止";
@@ -317,8 +346,11 @@ function stopDrive() {
 
 function saveProxySetting() {
   state.proxyBase = normalizeProxyBase(el.proxyEndpoint.value);
+  state.relayBase = normalizeRelayBase(el.relayEndpoint.value);
   if (state.proxyBase) localStorage.setItem(proxyStorageKey, state.proxyBase);
   else localStorage.removeItem(proxyStorageKey);
+  if (state.relayBase) localStorage.setItem(relayStorageKey, state.relayBase);
+  else localStorage.removeItem(relayStorageKey);
   state.cctvs = [];
   state.cctvsLoadedAt = 0;
   state.currentCamera = null;
@@ -334,6 +366,7 @@ document.addEventListener("visibilitychange", () => {
 
 el.openSettings.addEventListener("click", () => {
   el.proxyEndpoint.value = state.proxyBase;
+  el.relayEndpoint.value = state.relayBase;
   el.settingsDialog.showModal();
 });
 el.saveSettings.addEventListener("click", saveProxySetting);

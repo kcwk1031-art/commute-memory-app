@@ -93,10 +93,14 @@
         <h1>連線設定</h1>
       </div>
       <label>
-        CCTV Proxy 網址
+        鏡頭目錄 Proxy 網址
         <input id="proxyEndpoint" type="url" inputmode="url" placeholder="https://你的-worker.workers.dev">
       </label>
-      <p class="dialog-note">正式版由 Proxy 將國道 MJPEG 轉為可顯示快照，避免 iPhone 破圖。<a href="privacy.html">隱私權說明</a></p>
+      <label>
+        即時影像 Relay 網址
+        <input id="relayEndpoint" type="url" inputmode="url" placeholder="https://你的-relay.example.com">
+      </label>
+      <p class="dialog-note">目錄 Proxy 用來取得全台鏡頭位置；Relay 將官方影像轉為標準 JPEG MJPEG，避免 iPhone 破圖與 HLS 卡頓。<a href="privacy.html">隱私權說明</a></p>
       <div class="dialog-actions">
         <button class="secondary-action" value="cancel">取消</button>
         <button class="primary-action" id="saveSettings" value="default">保存設定</button>
