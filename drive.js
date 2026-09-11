@@ -45,6 +45,8 @@ const state = {
   lastPoint: null,
   imageLoadedAt: 0,
   refreshTimer: null,
+  reconnectTimer: null,
+  reconnectAttempts: 0,
   imageToken: 0,
   proxyBase: normalizeProxyBase(localStorage.getItem(proxyStorageKey) || window.DRIVE_CONFIG?.cctvProxyBase || ""),
   relayBase: normalizeRelayBase(localStorage.getItem(relayStorageKey) || window.DRIVE_CONFIG?.cctvRelayBase || ""),
@@ -201,7 +203,8 @@ function updateImageAge() {
   el.cameraAge.textContent = age < 60 ? `${age} 秒前` : `${Math.floor(age / 60)} 分前`;
 }
 
-function loadCameraStream(camera) {
+function loadCameraStream(camera, isReconnect = false) {
+  if (!isReconnect) state.reconnectAttempts = 0;
   const token = ++state.imageToken;
   state.imageLoadedAt = 0;
   el.cameraStage.dataset.state = "loading";
@@ -213,6 +216,7 @@ function loadCameraStream(camera) {
   el.cameraPlaceholder.querySelector("small").textContent = "確認鏡頭連線後才會顯示畫面。";
   el.cctvImage.onload = () => {
     if (token !== state.imageToken) return;
+    state.reconnectAttempts = 0;
     el.cctvImage.hidden = false;
     el.cameraPlaceholder.hidden = true;
     el.cameraOverlay.textContent = `${camera.road} ${formatDirection(camera.direction)}｜${camera.mile || "里程待確認"}`;
@@ -225,6 +229,20 @@ function loadCameraStream(camera) {
   el.cctvImage.onerror = () => {
     if (token !== state.imageToken) return;
     state.imageLoadedAt = 0;
+    if (state.active && state.currentCamera?.id === camera.id && state.reconnectAttempts < 2) {
+      state.reconnectAttempts += 1;
+      const delay = state.reconnectAttempts * 3000;
+      el.cameraStage.dataset.state = "loading";
+      el.cameraPlaceholder.hidden = false;
+      el.cameraPlaceholder.querySelector("strong").textContent = "正在重新連線影像";
+      el.cameraPlaceholder.querySelector("small").textContent = `第 ${state.reconnectAttempts} 次重試，確認串流是否恢復。`;
+      el.cameraStatus.textContent = "影像重新連線中";
+      window.clearTimeout(state.reconnectTimer);
+      state.reconnectTimer = window.setTimeout(() => {
+        if (state.active && state.currentCamera?.id === camera.id) loadCameraStream(camera, true);
+      }, delay);
+      return;
+    }
     el.cameraStage.dataset.state = "error";
     setCameraPlaceholder("影像暫不可用", state.relayBase ? "Relay 無法取得此鏡頭，系統將在下一次更新時重試。" : "此鏡頭為 MJPEG，請先設定影像 Relay。", "error");
     el.cameraStatus.textContent = "影像讀取失敗";
@@ -326,8 +344,11 @@ function startDrive() {
 function stopDrive() {
   if (state.watchId !== null) navigator.geolocation.clearWatch(state.watchId);
   if (state.refreshTimer !== null) window.clearInterval(state.refreshTimer);
+  if (state.reconnectTimer !== null) window.clearTimeout(state.reconnectTimer);
   state.watchId = null;
   state.refreshTimer = null;
+  state.reconnectTimer = null;
+  state.reconnectAttempts = 0;
   state.active = false;
   state.imageToken += 1;
   state.imageLoadedAt = 0;
