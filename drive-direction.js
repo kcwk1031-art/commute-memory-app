@@ -101,3 +101,90 @@ export function findCourseAnchor(samples, point, { minDistanceMeters, minElapsed
   }
   return null;
 }
+
+export function buildRouteSegments(cameras) {
+  const groups = new Map();
+  for (const camera of cameras) {
+    const route = cameraRouteKey(camera);
+    const direction = normalizeDirectionCode(camera?.direction, camera?.id);
+    const mile = parseRouteMile(camera?.mile);
+    const progressSign = directionProgressSign(direction, camera?.id);
+    if (!route || !direction || !Number.isFinite(mile) || !progressSign) continue;
+    if (!Number.isFinite(Number(camera?.lat)) || !Number.isFinite(Number(camera?.lng))) continue;
+    const key = `${route}:${direction}`;
+    if (!groups.has(key)) groups.set(key, { route, direction, progressSign, cameras: [] });
+    groups.get(key).cameras.push({ ...camera, mile, progress: mile * progressSign });
+  }
+
+  const segments = [];
+  for (const group of groups.values()) {
+    group.cameras.sort((left, right) => left.progress - right.progress);
+    for (let index = 0; index < group.cameras.length - 1; index += 1) {
+      const start = group.cameras[index];
+      const end = group.cameras[index + 1];
+      const length = distanceBetween(start, end);
+      const mileGap = Math.abs(end.mile - start.mile);
+      // CCTV coordinates are a sparse roadway polyline. Do not create a false segment
+      // across a large catalog gap or between two cameras mounted at the same location.
+      if (length < 20 || length > 5000 || mileGap < 0.02 || mileGap > 6) continue;
+      segments.push({
+        route: group.route,
+        direction: group.direction,
+        start,
+        end,
+        heading: bearingBetween(start, end),
+        length,
+      });
+    }
+  }
+  return segments;
+}
+
+export function distanceToSegmentMeters(point, start, end) {
+  const earth = 6371000;
+  const latitude = radians(point.lat);
+  const project = (source) => ({
+    x: radians(source.lng - point.lng) * earth * Math.cos(latitude),
+    y: radians(source.lat - point.lat) * earth,
+  });
+  const a = project(start);
+  const b = project(end);
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const lengthSquared = dx ** 2 + dy ** 2;
+  const t = lengthSquared ? Math.max(0, Math.min(1, (-(a.x * dx + a.y * dy)) / lengthSquared)) : 0;
+  const closestX = a.x + dx * t;
+  const closestY = a.y + dy * t;
+  return { distance: Math.hypot(closestX, closestY), progress: t };
+}
+
+export function matchRoadCorridor(segments, point, heading, {
+  maxDistanceMeters = 250,
+  maxHeadingDelta = 75,
+} = {}) {
+  if (!Number.isFinite(point?.lat) || !Number.isFinite(point?.lng) || !Number.isFinite(heading)) return null;
+  const candidates = segments
+    .map((segment) => {
+      const projection = distanceToSegmentMeters(point, segment.start, segment.end);
+      const headingDelta = Math.abs(angleDelta(heading, segment.heading));
+      return {
+        ...segment,
+        lateralDistance: projection.distance,
+        progress: projection.progress,
+        headingDelta,
+        score: projection.distance + headingDelta * 3,
+      };
+    })
+    .filter((segment) => segment.lateralDistance <= maxDistanceMeters)
+    .filter((segment) => segment.headingDelta <= maxHeadingDelta)
+    .sort((left, right) => left.score - right.score);
+
+  const match = candidates[0];
+  if (!match) return null;
+  const confidence = match.lateralDistance <= 60 && match.headingDelta <= 35
+    ? "high"
+    : match.lateralDistance <= 140 && match.headingDelta <= 55
+      ? "medium"
+      : "low";
+  return { ...match, confidence };
+}

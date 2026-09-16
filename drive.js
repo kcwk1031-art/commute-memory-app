@@ -1,27 +1,33 @@
 import {
   angleDelta,
   bearingBetween,
+  buildRouteSegments,
   cameraForwardHeading,
   cameraRouteKey,
   directionHeading,
   directionLabel,
   distanceBetween,
   findCourseAnchor,
+  matchRoadCorridor,
   normalizeDirectionCode,
 } from "./drive-direction.js";
+import { buildLaneGuidance } from "./drive-guidance.js";
 
 const TDX_CCTV_URL = "https://tdx.transportdata.tw/api/basic/v2/Road/Traffic/CCTV/Freeway?$format=JSON";
-const CAMERA_CACHE_MS = 6 * 60 * 60 * 1000;
+const CAMERA_CATALOG_REFRESH_MS = 15 * 60 * 1000;
+const PERSISTED_CAMERA_CATALOG_MAX_AGE_MS = 14 * 24 * 60 * 60 * 1000;
 const ROAD_REFRESH_MS = 15 * 1000;
 const LANE_REFRESH_MS = 60 * 1000;
-const LANE_DATA_MAX_AGE_MS = 3 * 60 * 1000;
 const MAX_CAMERA_DISTANCE_METERS = 5000;
 const CAMERA_SWITCH_METERS = 500;
 const CAMERA_BEARING_MAX_DELTA = 85;
 const CAMERA_DIRECTION_MAX_DELTA = 75;
 const RAMP_CAMERA_PENALTY = 650;
-const MAX_LOCATION_ACCURACY_METERS = 150;
-const STREAM_CONNECT_TIMEOUT_MS = 18000;
+const MAX_LOCATION_ACCURACY_METERS = 50;
+const OFFICIAL_STREAM_CONNECT_TIMEOUT_MS = 7500;
+const RELAY_STREAM_CONNECT_TIMEOUT_MS = 8500;
+const SNAPSHOT_CONNECT_TIMEOUT_MS = 5000;
+const SNAPSHOT_FALLBACK_REFRESH_MS = 4000;
 const MIN_COURSE_DISTANCE_METERS = 32;
 const MIN_COURSE_INTERVAL_SECONDS = 2;
 const MAX_COURSE_INTERVAL_SECONDS = 75;
@@ -35,6 +41,8 @@ const MAX_ESTIMATED_SPEED_KPH = 160;
 const LOCATION_OPTIONS = { enableHighAccuracy: true, maximumAge: 1000, timeout: 12000 };
 const proxyStorageKey = "commute-cctv-proxy-base-v1";
 const relayStorageKey = "commute-cctv-relay-base-v1";
+const cameraCatalogStorageKey = "commute-cctv-catalog-v1";
+const bundledCameraCatalogUrl = "./official-cctv-catalog.json";
 
 const el = {
   locationState: document.querySelector("#locationState"),
@@ -53,6 +61,9 @@ const el = {
   travelDirection: document.querySelector("#travelDirection"),
   travelDirectionNote: document.querySelector("#travelDirectionNote"),
   locationAccuracy: document.querySelector("#locationAccuracy"),
+  routeSummary: document.querySelector("#routeSummary"),
+  routeSummaryDetail: document.querySelector("#routeSummaryDetail"),
+  routeSummaryState: document.querySelector("#routeSummaryState"),
   laneReference: document.querySelector("#laneReference"),
   laneReferenceTitle: document.querySelector("#laneReferenceTitle"),
   laneReferenceDetail: document.querySelector("#laneReferenceDetail"),
@@ -77,6 +88,10 @@ const state = {
   watchId: null,
   cctvs: [],
   cctvsLoadedAt: 0,
+  cctvCatalogRefresh: null,
+  cctvSeedLoad: null,
+  routeSegments: [],
+  routeSegmentsForCctvs: null,
   currentCamera: null,
   displayedCamera: null,
   lastPoint: null,
@@ -86,6 +101,7 @@ const state = {
   refreshTimer: null,
   reconnectTimer: null,
   streamConnectTimer: null,
+  snapshotRefreshTimer: null,
   reconnectAttempts: 0,
   imageToken: 0,
   streamTransport: "",
@@ -133,6 +149,15 @@ function setObservation(title, detail, level = "waiting") {
   el.observation.dataset.level = level;
 }
 
+function setRouteSummary(title, detail, stateLabel = "待確認", level = "waiting") {
+  if (!el.routeSummary || !el.routeSummaryDetail || !el.routeSummaryState) return;
+  el.routeSummary.textContent = title;
+  el.routeSummaryDetail.textContent = detail;
+  el.routeSummaryState.textContent = stateLabel;
+  el.routeSummaryState.dataset.level = level;
+  el.routeSummary.closest(".route-summary")?.setAttribute("data-level", level);
+}
+
 function setLaneReference(title, detail, level = "waiting") {
   el.laneReferenceTitle.textContent = title;
   el.laneReferenceDetail.textContent = detail;
@@ -144,27 +169,9 @@ function clearLaneCards() {
   el.laneCards.hidden = true;
 }
 
-function laneTypeLabel(type) {
-  return ({ 1: "一般車道", 2: "快速車道", 3: "慢速車道" })[Number(type)] || "車道";
-}
-
-function formatLaneDataAge() {
-  const collectedAt = Date.parse(state.laneObservation?.vd?.dataCollectTime || "");
-  if (!Number.isFinite(collectedAt)) return "更新時間待確認";
-  const seconds = Math.max(0, Math.round((Date.now() - collectedAt) / 1000));
-  return seconds < 90 ? `${seconds} 秒前` : `${Math.floor(seconds / 60)} 分前`;
-}
-
 function updateLaneDataAge() {
   if (!state.laneObservation?.ok) return;
-  const collectedAt = Date.parse(state.laneObservation.vd?.dataCollectTime || "");
-  if (Number.isFinite(collectedAt) && Date.now() - collectedAt > LANE_DATA_MAX_AGE_MS) {
-    clearLaneCards();
-    setLaneReference("官方 VD 資料已過期", "車道資料超過 3 分鐘，系統暫停顯示車道比較。", "warning");
-    el.laneDataAge.textContent = formatLaneDataAge();
-    return;
-  }
-  el.laneDataAge.textContent = formatLaneDataAge();
+  renderLaneObservation(state.laneObservation);
 }
 
 function laneFailureCopy(observation) {
@@ -194,40 +201,37 @@ function renderLaneObservation(observation) {
     return;
   }
 
-  const collectedAt = Date.parse(observation.vd?.dataCollectTime || "");
-  if (Number.isFinite(collectedAt) && Date.now() - collectedAt > LANE_DATA_MAX_AGE_MS) {
+  const guidance = buildLaneGuidance(observation);
+  el.laneDataAge.textContent = guidance.freshness.label;
+  if (!guidance.freshness.canDisplay) {
     clearLaneCards();
-    el.laneDataAge.textContent = formatLaneDataAge();
-    setLaneReference("官方 VD 資料已過期", "車道資料超過 3 分鐘，系統暫停顯示車道比較。", "warning");
+    setLaneReference(guidance.title, guidance.detail, guidance.level);
     return;
   }
 
-  const reference = observation.flowReference || {};
-  const level = reference.state === "reference" ? "reference" : reference.state === "similar" ? "waiting" : "warning";
-  const mainLaneCount = Number(observation.mainLaneCount);
-  const laneCountLabel = Number.isInteger(mainLaneCount) && mainLaneCount > 0 ? `主線 ${mainLaneCount} 線道` : "主線車道資料";
-  setLaneReference(`${laneCountLabel}｜${reference.label || "官方 VD 資料"}`, reference.detail || "官方 VD 資料待確認。", level);
-  el.laneDataAge.textContent = formatLaneDataAge();
-  const cards = observation.lanes
-    .filter((lane) => [1, 2, 3].includes(Number(lane.laneType)) && Number.isFinite(Number(lane.speedKph)))
-    .map((lane) => {
+  setLaneReference(guidance.title, guidance.detail, guidance.level);
+  const cards = guidance.lanes.map((lane) => {
       const card = document.createElement("article");
       card.className = "lane-card";
-      if (reference.state === "reference" && String(reference.bestLaneId) === String(lane.laneId)) card.dataset.state = "reference";
-      const volume = Number.isFinite(Number(lane.volume)) ? `${Math.round(lane.volume)} 輛/分` : "流量待確認";
+      if (lane.isRecommended) card.dataset.state = "reference";
       const occupancy = Number.isFinite(Number(lane.occupancy)) ? `占有率 ${Math.round(lane.occupancy)}%` : "占有率待確認";
+      const volume = Number.isFinite(Number(lane.volume)) ? `流量 ${Math.round(lane.volume)} 輛/分` : "流量待確認";
+      const heading = document.createElement("div");
+      heading.className = "lane-card-heading";
       const title = document.createElement("span");
-      title.textContent = `第 ${lane.laneId} 車道｜${laneTypeLabel(lane.laneType)}`;
+      title.textContent = `第 ${lane.displayNumber} 車道`;
+      heading.append(title);
       const speed = document.createElement("strong");
       speed.append(String(Math.round(lane.speedKph)));
       const unit = document.createElement("small");
       unit.textContent = "km/h";
       speed.append(unit);
       const detail = document.createElement("small");
-      detail.textContent = `${occupancy}｜${volume}`;
-      card.append(title, speed, detail);
+      detail.textContent = occupancy;
+      detail.title = volume;
+      card.append(heading, speed, detail);
       return card;
-    });
+  });
   el.laneCards.replaceChildren(...cards);
   el.laneCards.hidden = !cards.length;
 }
@@ -267,14 +271,8 @@ function timeoutFetch(url, options = {}, timeout = 8000) {
   return fetch(url, { ...options, signal: controller.signal }).finally(() => window.clearTimeout(timer));
 }
 
-async function getCctvList() {
-  if (state.cctvs.length && Date.now() - state.cctvsLoadedAt < CAMERA_CACHE_MS) return state.cctvs;
-  const listUrl = state.proxyBase ? `${state.proxyBase}/v1/cameras` : TDX_CCTV_URL;
-  const response = await timeoutFetch(listUrl, { cache: "no-store" });
-  if (!response.ok) throw new Error(`CCTV 清單讀取失敗 (${response.status})`);
-  const payload = await response.json();
-  const rawCameras = state.proxyBase ? (payload.cameras || []) : (payload.CCTVs || []);
-  state.cctvs = rawCameras
+function normalizeCctvList(rawCameras) {
+  return rawCameras
     .filter((camera) => {
       const id = state.proxyBase ? camera.id : camera.CCTVID;
       const mediaUrl = state.proxyBase ? camera.mediaUrl : camera.VideoStreamURL;
@@ -294,8 +292,84 @@ async function getCctvList() {
         mediaUrl: camera.mediaUrl || camera.VideoStreamURL,
       };
     });
-  state.cctvsLoadedAt = Date.now();
+}
+
+function persistCctvList(cctvs, loadedAt) {
+  try {
+    localStorage.setItem(cameraCatalogStorageKey, JSON.stringify({ loadedAt, cctvs }));
+  } catch (_) {
+    // Safari private mode or a full local store must not prevent the road screen from working.
+  }
+}
+
+function hydratePersistedCctvList() {
+  if (state.cctvs.length) return state.cctvs;
+  try {
+    const cached = JSON.parse(localStorage.getItem(cameraCatalogStorageKey) || "null");
+    const loadedAt = Number(cached?.loadedAt);
+    const cctvs = Array.isArray(cached?.cctvs) ? cached.cctvs : [];
+    if (!Number.isFinite(loadedAt) || Date.now() - loadedAt > PERSISTED_CAMERA_CATALOG_MAX_AGE_MS || !cctvs.length) return [];
+    state.cctvs = cctvs.filter((camera) => camera?.id && camera?.mediaUrl && Number(camera?.lat) && Number(camera?.lng));
+    state.cctvsLoadedAt = loadedAt;
+  } catch (_) {
+    // A bad cache is ignored and refreshed from the public catalog when needed.
+  }
   return state.cctvs;
+}
+
+function hydrateBundledCctvList() {
+  if (state.cctvs.length) return Promise.resolve(state.cctvs);
+  if (state.cctvSeedLoad) return state.cctvSeedLoad;
+  state.cctvSeedLoad = fetch(bundledCameraCatalogUrl, { cache: "force-cache" })
+    .then(async (response) => {
+      if (!response.ok) throw new Error(`內建鏡頭目錄讀取失敗 (${response.status})`);
+      const payload = await response.json();
+      const cctvs = normalizeCctvList(payload.cameras || []);
+      if (!cctvs.length) throw new Error("內建鏡頭目錄沒有可用鏡頭");
+      state.cctvs = cctvs;
+      // A bundled catalog is only a startup fallback. Keep its age at zero so the Relay refreshes it in the background.
+      state.cctvsLoadedAt = 0;
+      persistCctvList(cctvs, Date.now());
+      return cctvs;
+    })
+    .catch(() => [])
+    .finally(() => {
+      state.cctvSeedLoad = null;
+    });
+  return state.cctvSeedLoad;
+}
+
+function refreshCctvList() {
+  if (state.cctvCatalogRefresh) return state.cctvCatalogRefresh;
+  const listUrl = state.proxyBase ? `${state.proxyBase}/v1/cameras` : TDX_CCTV_URL;
+  state.cctvCatalogRefresh = timeoutFetch(listUrl, { cache: "no-store" })
+    .then(async (response) => {
+      if (!response.ok) throw new Error(`CCTV 清單讀取失敗 (${response.status})`);
+      const payload = await response.json();
+      const rawCameras = state.proxyBase ? (payload.cameras || []) : (payload.CCTVs || []);
+      const cctvs = normalizeCctvList(rawCameras);
+      if (!cctvs.length) throw new Error("CCTV 清單沒有可用鏡頭");
+      state.cctvs = cctvs;
+      state.cctvsLoadedAt = Date.now();
+      persistCctvList(cctvs, state.cctvsLoadedAt);
+      return cctvs;
+    })
+    .finally(() => {
+      state.cctvCatalogRefresh = null;
+    });
+  return state.cctvCatalogRefresh;
+}
+
+async function getCctvList() {
+  hydratePersistedCctvList();
+  if (!state.cctvs.length) await hydrateBundledCctvList();
+  if (state.cctvs.length) {
+    if (Date.now() - state.cctvsLoadedAt >= CAMERA_CATALOG_REFRESH_MS) {
+      void refreshCctvList().catch(() => {});
+    }
+    return state.cctvs;
+  }
+  return refreshCctvList();
 }
 
 function resetCourse() {
@@ -369,24 +443,50 @@ function deriveSpeed(point) {
   return { value: Math.round(estimatedKph), source: "GPS 推估" };
 }
 
+function getRouteSegments() {
+  if (state.routeSegmentsForCctvs !== state.cctvs) {
+    state.routeSegments = buildRouteSegments(state.cctvs);
+    state.routeSegmentsForCctvs = state.cctvs;
+  }
+  return state.routeSegments;
+}
+
 function selectForwardCamera(point, course) {
   const heading = course?.heading;
   if (!Number.isFinite(heading)) return null;
-  const candidates = state.cctvs
+  const corridor = matchRoadCorridor(getRouteSegments(), point, heading);
+  const nearby = state.cctvs
     .map((camera) => {
       const distance = distanceBetween(point, camera);
       const bearing = bearingBetween(point, camera);
       const bearingDelta = Math.abs(angleDelta(heading, bearing));
+      return { ...camera, distance, bearingDelta };
+    })
+    .filter((camera) => camera.distance <= MAX_CAMERA_DISTANCE_METERS)
+    .filter((camera) => camera.bearingDelta <= CAMERA_BEARING_MAX_DELTA);
+  const corridorCandidates = corridor && corridor.confidence !== "low"
+    ? nearby.filter((camera) => cameraRouteKey(camera) === corridor.route
+      && normalizeDirectionCode(camera.direction, camera.id) === corridor.direction)
+    : [];
+  const candidates = (corridorCandidates.length ? corridorCandidates : nearby)
+    .map((camera) => {
       const localRoadHeading = cameraForwardHeading(state.cctvs, camera);
       const fallbackDirectionHeading = directionHeading(camera.direction, camera.id);
-      const routeHeading = Number.isFinite(localRoadHeading) ? localRoadHeading : fallbackDirectionHeading;
+      const corridorHeading = corridor
+        && cameraRouteKey(camera) === corridor.route
+        && normalizeDirectionCode(camera.direction, camera.id) === corridor.direction
+        ? corridor.heading
+        : NaN;
+      const routeHeading = Number.isFinite(localRoadHeading)
+        ? localRoadHeading
+        : Number.isFinite(corridorHeading)
+          ? corridorHeading
+          : fallbackDirectionHeading;
       const directionDelta = Number.isFinite(routeHeading) ? Math.abs(angleDelta(heading, routeHeading)) : NaN;
       const rampPenalty = isRampCamera(camera) ? RAMP_CAMERA_PENALTY : 0;
       const score = distance + bearingDelta * 12 + (Number.isFinite(directionDelta) ? directionDelta * 16 : 200) + rampPenalty;
-      return { ...camera, distance, bearingDelta, routeHeading, directionDelta, score };
+      return { ...camera, routeHeading, directionDelta, score, corridor };
     })
-    .filter((camera) => camera.distance <= MAX_CAMERA_DISTANCE_METERS)
-    .filter((camera) => camera.bearingDelta <= CAMERA_BEARING_MAX_DELTA)
     .filter((camera) => !Number.isFinite(camera.directionDelta) || camera.directionDelta <= CAMERA_DIRECTION_MAX_DELTA)
     .sort((a, b) => a.score - b.score);
 
@@ -403,7 +503,11 @@ function streamSources(camera) {
   const officialUrl = String(camera.mediaUrl || "").trim();
   if (/^https:\/\//i.test(officialUrl)) sources.push({ kind: "official", label: "官方原生串流", url: officialUrl });
   if (state.relayBase) sources.push({ kind: "relay", label: "Relay 串流", url: `${state.relayBase}/mjpeg/${encodeURIComponent(camera.id)}` });
-  if (state.proxyBase) sources.push({ kind: "proxy", label: "Proxy 串流", url: `${state.proxyBase}/v1/stream?id=${encodeURIComponent(camera.id)}` });
+  // The bundled Relay has no /v1/stream endpoint. Keep this only for a separately configured legacy proxy.
+  if (state.proxyBase && state.proxyBase !== state.relayBase) {
+    sources.push({ kind: "proxy", label: "Proxy 串流", url: `${state.proxyBase}/v1/stream?id=${encodeURIComponent(camera.id)}` });
+  }
+  if (state.relayBase) sources.push({ kind: "snapshot", label: "官方快照備援", url: `${state.relayBase}/latest/${encodeURIComponent(camera.id)}` });
   return sources.filter((source, index, list) => list.findIndex((candidate) => candidate.url === source.url) === index);
 }
 
@@ -411,6 +515,18 @@ function renderCameraContext(camera) {
   el.roadLabel.textContent = `${camera.road} ${directionLabel(camera.direction, camera.id)}｜${camera.mile || "里程待確認"}`;
   el.roadDetail.textContent = camera.section || "附近前方國道 CCTV";
   el.cameraDistance.textContent = formatDistance(camera.distance);
+}
+
+function renderRouteSummary(camera, directionVerified) {
+  const road = `${camera.road} ${directionLabel(camera.direction, camera.id)} 主線`;
+  const mile = camera.mile || "里程待確認";
+  const cameraDistance = formatDistance(camera.distance);
+  if (directionVerified) {
+    const corridorLabel = camera.corridor?.confidence === "high" ? "道路走廊已確認" : "同向主線已確認";
+    setRouteSummary(road, `${mile}｜前方官方 CCTV ${cameraDistance}`, corridorLabel, "live");
+    return;
+  }
+  setRouteSummary(road, `${mile}｜鏡頭方向資料待進一步確認`, "影像參考", "reference");
 }
 
 async function refreshLaneObservation(camera) {
@@ -441,7 +557,34 @@ async function refreshLaneObservation(camera) {
   }
 }
 
+function pauseRoadDataForLowAccuracy(point) {
+  state.laneRequestToken += 1;
+  state.laneCameraId = "";
+  state.laneObservation = null;
+  clearLaneCards();
+  el.laneDataAge.textContent = "--";
+  setLaneReference("等待較精確定位", `目前定位誤差 ${Math.round(point.accuracy)} m，需在 ${MAX_LOCATION_ACCURACY_METERS} m 內才會顯示同向車道速度。`, "warning");
+  if (state.currentCamera) {
+    el.cameraStatus.textContent = "定位精度不足｜保留已確認影像";
+    setRouteSummary(
+      `${state.currentCamera.road} ${directionLabel(state.currentCamera.direction, state.currentCamera.id)} 主線`,
+      `定位誤差 ${Math.round(point.accuracy)} m，暫停更新道路、車道速度與推薦。`,
+      "定位精度不足",
+      "warning",
+    );
+  } else {
+    setRouteSummary("道路走廊待確認", `定位誤差需在 ${MAX_LOCATION_ACCURACY_METERS} m 內，才會判讀道路與方向。`, "定位精度不足", "warning");
+  }
+  setSource("定位精度不足", "warning");
+  setObservation("定位精度不足", "目前不切換鏡頭或提供車道建議，避免顯示錯誤道路、方向或匝道資料。", "warning");
+}
+
 function updateImageAge() {
+  if (state.streamTransport === "snapshot" && state.imageLoadedAt) {
+    const age = Math.max(0, Math.floor((Date.now() - state.imageLoadedAt) / 1000));
+    el.cameraAge.textContent = `備援快照｜${age} 秒前`;
+    return;
+  }
   if (state.imageLoadedAt && (state.proxyBase || state.relayBase) && el.cameraStage.dataset.state === "ready") {
     // MJPEG <img> does not expose a per-frame heartbeat, so do not claim the feed is live.
     el.cameraAge.textContent = "串流已連線";
@@ -460,9 +603,21 @@ function clearStreamConnectTimer() {
   state.streamConnectTimer = null;
 }
 
+function clearSnapshotRefreshTimer() {
+  if (state.snapshotRefreshTimer !== null) window.clearTimeout(state.snapshotRefreshTimer);
+  state.snapshotRefreshTimer = null;
+}
+
+function streamConnectTimeout(source) {
+  if (source?.kind === "official") return OFFICIAL_STREAM_CONNECT_TIMEOUT_MS;
+  if (source?.kind === "snapshot") return SNAPSHOT_CONNECT_TIMEOUT_MS;
+  return RELAY_STREAM_CONNECT_TIMEOUT_MS;
+}
+
 function handleStreamFailure(camera, token, hadVisibleImage, sourceIndex) {
   if (token !== state.imageToken) return;
   clearStreamConnectTimer();
+  clearSnapshotRefreshTimer();
   const sources = streamSources(camera);
   const fallbackIndex = sourceIndex + 1;
   if (state.active && state.currentCamera?.id === camera.id && sources[fallbackIndex]) {
@@ -510,6 +665,7 @@ function handleStreamFailure(camera, token, hadVisibleImage, sourceIndex) {
 function loadCameraStream(camera, isReconnect = false, sourceIndex = 0) {
   if (!isReconnect && sourceIndex === 0) state.reconnectAttempts = 0;
   clearStreamConnectTimer();
+  clearSnapshotRefreshTimer();
   const sources = streamSources(camera);
   const stream = sources[sourceIndex];
   if (!stream) {
@@ -546,15 +702,27 @@ function loadCameraStream(camera, isReconnect = false, sourceIndex = 0) {
     el.cameraOverlay.hidden = false;
     el.cameraStage.dataset.state = "ready";
     state.imageLoadedAt = Date.now();
-    el.cameraStatus.textContent = stream.label;
+    el.cameraStatus.textContent = stream.kind === "snapshot" ? "官方快照備援" : stream.label;
     updateImageAge();
+    if (stream.kind === "snapshot" && state.active && state.currentCamera?.id === camera.id) {
+      state.snapshotRefreshTimer = window.setTimeout(() => {
+        if (state.active && state.currentCamera?.id === camera.id) loadCameraStream(camera, true, sourceIndex);
+      }, SNAPSHOT_FALLBACK_REFRESH_MS);
+    }
   };
   el.cctvImage.onerror = () => handleStreamFailure(camera, token, hadVisibleImage, sourceIndex);
-  state.streamConnectTimer = window.setTimeout(() => handleStreamFailure(camera, token, hadVisibleImage, sourceIndex), STREAM_CONNECT_TIMEOUT_MS);
+  state.streamConnectTimer = window.setTimeout(
+    () => handleStreamFailure(camera, token, hadVisibleImage, sourceIndex),
+    streamConnectTimeout(stream),
+  );
   el.cctvImage.src = `${stream.url}${stream.url.includes("?") ? "&" : "?"}t=${Date.now()}`;
 }
 
 async function refreshRoadInformation(point) {
+  if (Number(point?.accuracy) > MAX_LOCATION_ACCURACY_METERS) {
+    pauseRoadDataForLowAccuracy(point);
+    return;
+  }
   const course = state.course && point.timestamp - state.course.updatedAt <= COURSE_HOLD_MS ? state.course : null;
   if (!course || !Number.isFinite(course.heading)) {
     state.laneRequestToken += 1;
@@ -565,11 +733,18 @@ async function refreshRoadInformation(point) {
     setLaneReference("等待實際行駛方向", "需要累積足夠的 GPS 移動距離後，才會比對同向主線的官方車道速度資料。", "waiting");
     setSource("方向確認中", "warning");
     if (state.displayedCamera && !el.cctvImage.hidden) {
+      setRouteSummary(
+        `${state.displayedCamera.road} ${directionLabel(state.displayedCamera.direction, state.displayedCamera.id)} 主線`,
+        "正在重新確認 GPS 連續航向，暫停更新道路與車道推薦。",
+        "方向確認中",
+        "waiting",
+      );
       setObservation("持續確認行駛方向", "保留已確認影像；未取得連續 GPS 航向前不切換到其他方向的鏡頭。", "warning");
     } else {
       el.roadLabel.textContent = "正在確認實際行駛方向";
       el.roadDetail.textContent = "累積 GPS 移動距離後，才會選擇同向前方鏡頭。";
       el.cameraDistance.textContent = "--";
+      setRouteSummary("道路走廊待確認", "累積約 32 至 90 公尺的 GPS 連續移動後，才會顯示道路、方向與車道資料。", "方向確認中", "waiting");
       setCameraPlaceholder("正在確認行駛方向", "車輛移動一小段距離後，系統才會載入同向前方影像。", "waiting");
       setObservation("等待 GPS 連續定位", "尚未取得可判定的實際航向，因此不顯示可能反向的鏡頭。", "warning");
     }
@@ -581,12 +756,19 @@ async function refreshRoadInformation(point) {
     if (!selected) {
       setSource("前方無可確認鏡頭", "warning");
       if (state.displayedCamera && !el.cctvImage.hidden) {
+        setRouteSummary(
+          `${state.displayedCamera.road} ${directionLabel(state.displayedCamera.direction, state.displayedCamera.id)} 主線`,
+          "正在重新確認道路走廊；保留目前已確認影像。",
+          "道路確認中",
+          "waiting",
+        );
         // Do not replace a confirmed frame with an unrelated nearest camera when GPS data is ambiguous.
         setObservation("正在重新確認道路方向", "保留目前影像，直到能確認同向前方鏡頭後才會切換。", "warning");
       } else {
         el.roadLabel.textContent = "目前位置前方沒有可確認國道影像";
         el.roadDetail.textContent = "未確認道路與方向時，不改抓平行道路的最近鏡頭。";
         el.cameraDistance.textContent = "--";
+        setRouteSummary("道路走廊待確認", "目前位置尚未能對應同向國道主線，因此不顯示可能錯誤的車道資料。", "道路確認中", "warning");
         setCameraPlaceholder("前方無可確認影像", "保持定位後會自動再找。", "waiting");
         setObservation("資料不足", "位置或方向尚未足以確認同向前方鏡頭。", "warning");
       }
@@ -595,15 +777,18 @@ async function refreshRoadInformation(point) {
     const changed = selected.id !== state.currentCamera?.id;
     state.currentCamera = selected;
     if (!state.displayedCamera || state.displayedCamera.id === selected.id) renderCameraContext(selected);
-    const directionVerified = Number.isFinite(selected.routeHeading) && Number.isFinite(selected.directionDelta);
+    const corridorVerified = !selected.corridor || ["high", "medium"].includes(selected.corridor.confidence);
+    const directionVerified = Number.isFinite(selected.routeHeading) && Number.isFinite(selected.directionDelta) && corridorVerified;
+    renderRouteSummary(selected, directionVerified);
     setSource(directionVerified ? "同向前方影像" : "前方影像參考", directionVerified ? "live" : "reference");
     setObservation("前方道路影像", directionVerified
-      ? `GPS 實際行駛方向已與 ${selected.road} ${directionLabel(selected.direction, selected.id)} 主線比對；已選擇 ${formatDistance(selected.distance)} 前方鏡頭。`
+      ? `${selected.corridor ? "道路走廊與 GPS 航向已比對" : "GPS 實際行駛方向已比對"} ${selected.road} ${directionLabel(selected.direction, selected.id)} 主線；已選擇 ${formatDistance(selected.distance)} 前方鏡頭。`
       : "已取得 GPS 行駛方向，但鏡頭道路方向資料不足，僅作前方影像參考。", "reference");
     if (changed || !state.imageLoadedAt) loadCameraStream(selected);
     if (directionVerified) void refreshLaneObservation(selected);
   } catch (error) {
     setSource("CCTV 清單失敗", "error");
+    setRouteSummary("道路資料暫不可用", "目前無法讀取鏡頭目錄；保留既有道路資訊並在下一次定位時重試。", "讀取失敗", "error");
     setObservation("道路資料暫不可用", error.name === "AbortError" ? "讀取逾時，將在下一次定位更新時重試。" : "無法讀取 CCTV 清單，請確認網路後重試。", "error");
   }
 }
@@ -618,15 +803,14 @@ function handlePosition(position) {
     timestamp: Number(position.timestamp) || Date.now(),
   };
   const speed = deriveSpeed(point);
-  el.locationState.textContent = `定位正常｜誤差 ${Math.round(point.accuracy)} m`;
+  el.locationState.textContent = `${point.accuracy <= MAX_LOCATION_ACCURACY_METERS ? "定位正常" : "定位精度不足"}｜誤差 ${Math.round(point.accuracy)} m`;
   el.locationAccuracy.textContent = String(Math.round(point.accuracy));
   el.gpsSpeed.textContent = Number.isFinite(speed.value) ? String(speed.value) : "--";
   el.gpsSpeedNote.textContent = Number.isFinite(speed.value) ? `${speed.source} km/h` : speed.source;
   if (point.accuracy > MAX_LOCATION_ACCURACY_METERS) {
     el.travelDirection.textContent = "--";
-    el.travelDirectionNote.textContent = "定位誤差較大";
-    setSource("位置確認中", "warning");
-    setObservation("定位誤差較大", "目前不切換鏡頭，避免顯示錯誤道路或匝道影像。", "warning");
+    el.travelDirectionNote.textContent = `需在 ${MAX_LOCATION_ACCURACY_METERS} m 內`;
+    pauseRoadDataForLowAccuracy(point);
     state.lastPoint = point;
     return;
   }
@@ -646,6 +830,7 @@ function handleLocationError(error) {
     3: "定位逾時，保持畫面開啟後會自動重試。",
   };
   el.locationState.textContent = "定位暫不可用";
+  setRouteSummary("道路走廊待確認", messages[error.code] || "定位服務暫時失敗。", "定位失敗", "error");
   setSource("定位失敗", "error");
   setObservation("未啟動道路判讀", messages[error.code] || "定位服務暫時失敗。", "error");
 }
@@ -671,6 +856,7 @@ function startDrive() {
   el.stopDrive.hidden = false;
   el.locationState.textContent = "正在確認定位";
   setSource("定位啟動中", "waiting");
+  setRouteSummary("道路走廊待確認", "定位與實際行駛方向確認後，將顯示國道、方向、里程與官方車道流況。", "定位啟動中", "waiting");
   setObservation("正在尋找前方影像", "定位確認後會自動選擇前方候選鏡頭。", "waiting");
   setLaneReference("等待同向偵測器", "定位與前方鏡頭確認後，才會讀取最近同向主線的官方車道速度資料。", "waiting");
   state.watchId = navigator.geolocation.watchPosition(handlePosition, handleLocationError, LOCATION_OPTIONS);
@@ -686,6 +872,7 @@ function stopDrive() {
   if (state.refreshTimer !== null) window.clearInterval(state.refreshTimer);
   if (state.reconnectTimer !== null) window.clearTimeout(state.reconnectTimer);
   clearStreamConnectTimer();
+  clearSnapshotRefreshTimer();
   state.watchId = null;
   state.refreshTimer = null;
   state.reconnectTimer = null;
@@ -697,6 +884,7 @@ function stopDrive() {
   resetCourse();
   state.imageToken += 1;
   state.imageLoadedAt = 0;
+  state.streamTransport = "";
   state.laneRequestToken += 1;
   state.laneCameraId = "";
   state.laneObservation = null;
@@ -716,6 +904,7 @@ function stopDrive() {
   el.travelDirection.textContent = "--";
   el.travelDirectionNote.textContent = "待移動確認";
   setSource("資料待命", "waiting");
+  setRouteSummary("道路資料待命", "再次啟動後，將依 GPS 顯示國道、方向、里程與同向車道流況。", "定位已停止", "waiting");
   setObservation("即時道路資訊已停止", "影像不再自動更新。", "waiting");
 }
 
@@ -745,6 +934,8 @@ function resetServiceSettings() {
   state.cctvsLoadedAt = 0;
   state.currentCamera = null;
   state.imageLoadedAt = 0;
+  state.streamTransport = "";
+  clearSnapshotRefreshTimer();
   state.laneCameraId = "";
   state.laneObservation = null;
   state.laneFetchedAt = 0;
@@ -774,6 +965,8 @@ function saveProxySetting() {
   state.cctvsLoadedAt = 0;
   state.currentCamera = null;
   state.imageLoadedAt = 0;
+  state.streamTransport = "";
+  clearSnapshotRefreshTimer();
   state.laneCameraId = "";
   state.laneObservation = null;
   state.laneFetchedAt = 0;
@@ -809,6 +1002,15 @@ window.setInterval(() => {
 if (!state.proxyBase) {
   setSource("影像服務未設定", "warning");
   setObservation("請先設定影像服務", "設定完成後，才會讀取定位並載入前方道路影像。", "warning");
+}
+
+// Camera positions rarely change. Keeping the last verified catalog lets a returning driver
+// select the direct official image even while a sleeping relay is warming up.
+hydratePersistedCctvList();
+if (state.proxyBase) {
+  window.addEventListener("load", () => {
+    void refreshCctvList().catch(() => {});
+  }, { once: true });
 }
 
 if ("serviceWorker" in navigator) {

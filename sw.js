@@ -1,5 +1,5 @@
-const SHELL_CACHE = "commute-drive-shell-v9";
-const SHELL_FILES = ["./", "./index.html", "./drive.css", "./drive.js", "./drive-direction.js", "./drive-config.js", "./manifest.webmanifest"];
+const SHELL_CACHE = "commute-drive-shell-v13";
+const SHELL_FILES = ["./", "./index.html", "./drive.css", "./drive.js", "./drive-direction.js", "./drive-guidance.js", "./drive-config.js", "./official-cctv-catalog.json", "./manifest.webmanifest"];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(SHELL_CACHE).then((cache) => cache.addAll(SHELL_FILES)));

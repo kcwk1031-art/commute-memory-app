@@ -25,6 +25,27 @@
       <strong id="locationState">定位未啟動</strong>
     </section>
 
+    <section class="route-summary" aria-label="道路與方向判讀">
+      <div>
+        <p>目前道路</p>
+        <strong id="routeSummary">道路資料待命</strong>
+        <small id="routeSummaryDetail">定位與實際行駛方向確認後，將顯示國道、方向與里程。</small>
+      </div>
+      <span id="routeSummaryState" data-level="waiting">待確認</span>
+    </section>
+
+    <section class="lane-reference" id="laneReference" data-level="waiting" aria-label="官方車道流況參考">
+      <div class="lane-reference-heading">
+        <div>
+          <p>官方 VD 車道流況</p>
+          <strong id="laneReferenceTitle">等待同向偵測器</strong>
+        </div>
+        <span id="laneDataAge">--</span>
+      </div>
+      <p id="laneReferenceDetail">定位與前方鏡頭確認後，才會讀取最近同向主線的官方車道速度資料。</p>
+      <div class="lane-card-list" id="laneCards" hidden></div>
+    </section>
+
     <section class="camera-panel" aria-label="前方道路影像">
       <div class="camera-heading">
         <div>
@@ -70,18 +91,6 @@
         <strong id="locationAccuracy">--</strong>
         <small>公尺</small>
       </article>
-    </section>
-
-    <section class="lane-reference" id="laneReference" data-level="waiting" aria-label="官方車道流況參考">
-      <div class="lane-reference-heading">
-        <div>
-          <p>官方 VD 車道資料</p>
-          <strong id="laneReferenceTitle">等待同向偵測器</strong>
-        </div>
-        <span id="laneDataAge">--</span>
-      </div>
-      <p id="laneReferenceDetail">定位與前方鏡頭確認後，才會讀取最近同向主線的官方車道速度資料。</p>
-      <div class="lane-card-list" id="laneCards" hidden></div>
     </section>
 
     <section class="observation" id="observation" data-level="waiting">
