@@ -98,6 +98,7 @@ const el = {
   settingsServiceStatus: document.querySelector("#settingsServiceStatus"),
   saveSettings: document.querySelector("#saveSettings"),
   resetSettings: document.querySelector("#resetSettings"),
+  cancelSettings: document.querySelector("#cancelSettings"),
 };
 
 const state = {
@@ -180,6 +181,24 @@ function setRouteSummary(title, detail, stateLabel = "待確認", level = "waiti
   el.routeSummary.closest(".route-summary")?.setAttribute("data-level", level);
 }
 
+function showAppDialog(dialog) {
+  if (typeof dialog?.showModal === "function") {
+    dialog.showModal();
+    return;
+  }
+  document.body.dataset.dialogOpen = dialog.id;
+  dialog.setAttribute("open", "");
+}
+
+function closeAppDialog(dialog) {
+  if (typeof dialog?.close === "function" && dialog.open) {
+    dialog.close();
+  } else {
+    dialog.removeAttribute("open");
+  }
+  if (document.body.dataset.dialogOpen === dialog.id) delete document.body.dataset.dialogOpen;
+}
+
 function renderTripPlan() {
   if (!el.tripPlan) return;
   const destination = state.destination;
@@ -211,7 +230,7 @@ function renderTripPlan() {
 
 function openDestinationDialog() {
   el.destinationInput.value = state.destination;
-  el.destinationDialog.showModal();
+  showAppDialog(el.destinationDialog);
   window.setTimeout(() => el.destinationInput.focus(), 0);
 }
 
@@ -226,7 +245,7 @@ function saveDestination() {
   state.destination = destination;
   localStorage.setItem(destinationStorageKey, destination);
   renderTripPlan();
-  el.destinationDialog.close();
+  closeAppDialog(el.destinationDialog);
 }
 
 function clearDestination() {
@@ -234,7 +253,7 @@ function clearDestination() {
   localStorage.removeItem(destinationStorageKey);
   el.destinationInput.value = "";
   renderTripPlan();
-  el.destinationDialog.close();
+  closeAppDialog(el.destinationDialog);
 }
 
 function setLaneReference(title, detail, level = "waiting") {
@@ -1025,7 +1044,7 @@ function resetServiceSettings() {
   el.proxyEndpoint.value = state.proxyBase;
   el.relayEndpoint.value = state.relayBase;
   refreshSettingsServiceStatus();
-  el.settingsDialog.close();
+  closeAppDialog(el.settingsDialog);
   if (state.lastPoint) void refreshRoadInformation(state.lastPoint);
 }
 
@@ -1054,7 +1073,7 @@ function saveProxySetting() {
   el.laneDataAge.textContent = "--";
   setLaneReference("等待同向偵測器", "定位與前方鏡頭確認後，才會讀取最近同向主線的官方車道速度資料。", "waiting");
   refreshSettingsServiceStatus();
-  el.settingsDialog.close();
+  closeAppDialog(el.settingsDialog);
   if (state.lastPoint) void refreshRoadInformation(state.lastPoint);
 }
 
@@ -1067,10 +1086,11 @@ el.openSettings.addEventListener("click", () => {
   el.proxyEndpoint.value = state.proxyBase;
   el.relayEndpoint.value = state.relayBase;
   refreshSettingsServiceStatus();
-  el.settingsDialog.showModal();
+  showAppDialog(el.settingsDialog);
 });
 el.saveSettings.addEventListener("click", saveProxySetting);
 el.resetSettings.addEventListener("click", resetServiceSettings);
+el.cancelSettings.addEventListener("click", () => closeAppDialog(el.settingsDialog));
 el.editDestination.addEventListener("click", openDestinationDialog);
 el.destinationForm.addEventListener("submit", (event) => {
   event.preventDefault();
@@ -1079,7 +1099,7 @@ el.destinationForm.addEventListener("submit", (event) => {
 el.destinationInput.addEventListener("input", () => el.destinationInput.setCustomValidity(""));
 el.saveDestination.addEventListener("click", saveDestination);
 el.clearDestination.addEventListener("click", clearDestination);
-el.cancelDestination.addEventListener("click", () => el.destinationDialog.close());
+el.cancelDestination.addEventListener("click", () => closeAppDialog(el.destinationDialog));
 el.startDrive.addEventListener("click", startDrive);
 el.stopDrive.addEventListener("click", stopDrive);
 window.setInterval(() => {

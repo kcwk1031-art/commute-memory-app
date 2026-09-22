@@ -483,6 +483,23 @@ button { cursor: pointer; }
 }
 .destination-dialog { width: min(calc(100% - 32px), 440px); }
 .settings-dialog::backdrop { background: rgba(10, 23, 18, .48); }
+body[data-dialog-open]::before {
+  position: fixed;
+  z-index: 20;
+  inset: 0;
+  content: "";
+  background: rgba(10, 23, 18, .48);
+}
+.settings-dialog[open] {
+  position: fixed;
+  z-index: 21;
+  top: 50%;
+  left: 50%;
+  max-height: min(720px, calc(100dvh - 32px));
+  margin: 0;
+  overflow: auto;
+  transform: translate(-50%, -50%);
+}
 .settings-form { display: grid; gap: 16px; padding: 20px; }
 .settings-form h1 { margin: 4px 0 0; font-size: 24px; }
 .settings-form label { display: grid; gap: 7px; font-size: 14px; font-weight: 800; }
