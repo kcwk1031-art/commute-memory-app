@@ -1,4 +1,4 @@
-const SHELL_CACHE = "commute-drive-shell-v15";
+const SHELL_CACHE = "commute-drive-shell-v17";
 const SHELL_FILES = ["./", "./index.html", "./drive.css", "./drive.js", "./drive-direction.js", "./drive-guidance.js", "./drive-config.js", "./official-cctv-catalog.json", "./manifest.webmanifest"];
 
 self.addEventListener("install", (event) => {
@@ -17,7 +17,7 @@ self.addEventListener("fetch", (event) => {
   if (requestUrl.origin !== self.location.origin) return;
 
   // Driver code and configuration must update first. Cache is only an offline fallback.
-  const isAppShell = event.request.mode === "navigate" || /\.(?:html|js|css|webmanifest)$/.test(requestUrl.pathname);
+  const isAppShell = event.request.mode === "navigate" || /\.(?:html|js|css|json|webmanifest)$/.test(requestUrl.pathname);
   if (isAppShell) {
     event.respondWith(networkFirst(event.request));
     return;

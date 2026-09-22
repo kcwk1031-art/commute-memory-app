@@ -48,10 +48,12 @@ const bundledCameraCatalogUrl = "./official-cctv-catalog.json";
 const el = {
   locationState: document.querySelector("#locationState"),
   sourceChip: document.querySelector("#sourceChip"),
+  retryRoadData: document.querySelector("#retryRoadData"),
   roadLabel: document.querySelector("#roadLabel"),
   roadDetail: document.querySelector("#roadDetail"),
   cameraStage: document.querySelector("#cameraStage"),
   cctvImage: document.querySelector("#cctvImage"),
+  cctvPreview: document.querySelector("#cctvPreview"),
   cameraPlaceholder: document.querySelector("#cameraPlaceholder"),
   cameraOverlay: document.querySelector("#cameraOverlay"),
   cameraStatus: document.querySelector("#cameraStatus"),
@@ -116,6 +118,7 @@ const state = {
   course: null,
   courseSamples: [],
   imageLoadedAt: 0,
+  previewLoadedAt: 0,
   refreshTimer: null,
   reconnectTimer: null,
   streamConnectTimer: null,
@@ -164,6 +167,7 @@ function getDefaultRelayBase() {
 function setSource(label, level = "waiting") {
   el.sourceChip.textContent = label;
   el.sourceChip.dataset.level = level;
+  el.retryRoadData.hidden = level !== "error" || !state.active;
 }
 
 function setObservation(title, detail, level = "waiting") {
@@ -337,6 +341,8 @@ function renderLaneObservation(observation) {
 function setCameraPlaceholder(title, detail, stage = "waiting") {
   el.cameraStage.dataset.state = stage;
   el.cctvImage.hidden = true;
+  el.cctvPreview.hidden = true;
+  el.cctvPreview.removeAttribute("src");
   el.cameraPlaceholder.hidden = false;
   el.cameraPlaceholder.querySelector("strong").textContent = title;
   el.cameraPlaceholder.querySelector("small").textContent = detail;
@@ -678,6 +684,11 @@ function pauseRoadDataForLowAccuracy(point) {
 }
 
 function updateImageAge() {
+  if (el.cctvImage.hidden && !el.cctvPreview.hidden && state.previewLoadedAt) {
+    const age = Math.max(0, Math.floor((Date.now() - state.previewLoadedAt) / 1000));
+    el.cameraAge.textContent = `快照備援｜${age} 秒前`;
+    return;
+  }
   if (state.streamTransport === "snapshot" && state.imageLoadedAt) {
     const age = Math.max(0, Math.floor((Date.now() - state.imageLoadedAt) / 1000));
     el.cameraAge.textContent = `備援快照｜${age} 秒前`;
@@ -704,6 +715,31 @@ function clearStreamConnectTimer() {
 function clearSnapshotRefreshTimer() {
   if (state.snapshotRefreshTimer !== null) window.clearTimeout(state.snapshotRefreshTimer);
   state.snapshotRefreshTimer = null;
+}
+
+function hasVisibleCameraImage() {
+  return Boolean(state.displayedCamera) && (!el.cctvImage.hidden || !el.cctvPreview.hidden);
+}
+
+function preloadCameraSnapshot(camera, token) {
+  if (!state.relayBase) return;
+  const preview = el.cctvPreview;
+  preview.onload = () => {
+    if (token !== state.imageToken || !state.active || state.currentCamera?.id !== camera.id || !el.cctvImage.hidden) return;
+    preview.hidden = false;
+    el.cameraPlaceholder.hidden = true;
+    state.displayedCamera = camera;
+    state.previewLoadedAt = Date.now();
+    renderCameraContext(camera);
+    el.cameraOverlay.textContent = `${camera.road} ${directionLabel(camera.direction, camera.id)}｜${camera.mile || "里程待確認"}`;
+    el.cameraOverlay.hidden = false;
+    el.cameraStage.dataset.state = "ready";
+    el.cameraStatus.textContent = "快照已顯示，串流連線中";
+    updateImageAge();
+  };
+  preview.onerror = () => {};
+  preview.hidden = true;
+  preview.src = `${state.relayBase}/latest/${encodeURIComponent(camera.id)}?t=${Date.now()}`;
 }
 
 function streamConnectTimeout(source) {
@@ -767,12 +803,12 @@ function loadCameraStream(camera, isReconnect = false, sourceIndex = 0) {
   const sources = streamSources(camera);
   const stream = sources[sourceIndex];
   if (!stream) {
-    handleStreamFailure(camera, state.imageToken, !el.cctvImage.hidden && Boolean(state.displayedCamera), sourceIndex);
+    handleStreamFailure(camera, state.imageToken, hasVisibleCameraImage(), sourceIndex);
     return;
   }
   const token = ++state.imageToken;
   state.streamTransport = stream.kind;
-  const hadVisibleImage = !el.cctvImage.hidden && Boolean(state.displayedCamera);
+  const hadVisibleImage = hasVisibleCameraImage();
   if (hadVisibleImage) {
     // Keep the last confirmed frame visible while a new camera is connecting.
     el.cameraStage.dataset.state = "ready";
@@ -783,16 +819,21 @@ function loadCameraStream(camera, isReconnect = false, sourceIndex = 0) {
     el.cameraStage.dataset.state = "loading";
     el.cameraStatus.textContent = `連線${stream.label}`;
     el.cctvImage.hidden = true;
+    el.cctvPreview.hidden = true;
     el.cameraOverlay.hidden = true;
     el.cameraPlaceholder.hidden = false;
     el.cameraPlaceholder.querySelector("strong").textContent = "正在連線前方影像";
     el.cameraPlaceholder.querySelector("small").textContent = "確認鏡頭連線後才會顯示畫面。";
+    if (sourceIndex === 0) preloadCameraSnapshot(camera, token);
   }
   el.cctvImage.onload = () => {
     if (token !== state.imageToken) return;
     clearStreamConnectTimer();
     state.reconnectAttempts = 0;
     el.cctvImage.hidden = false;
+    el.cctvPreview.hidden = true;
+    el.cctvPreview.removeAttribute("src");
+    state.previewLoadedAt = 0;
     el.cameraPlaceholder.hidden = true;
     state.displayedCamera = camera;
     renderCameraContext(camera);
@@ -982,6 +1023,7 @@ function stopDrive() {
   resetCourse();
   state.imageToken += 1;
   state.imageLoadedAt = 0;
+  state.previewLoadedAt = 0;
   state.streamTransport = "";
   state.laneRequestToken += 1;
   state.laneCameraId = "";
@@ -993,6 +1035,8 @@ function stopDrive() {
   el.cctvImage.onload = null;
   el.cctvImage.onerror = null;
   el.cctvImage.removeAttribute("src");
+  el.cctvPreview.onload = null;
+  el.cctvPreview.onerror = null;
   setCameraPlaceholder("即時道路資訊已停止", "再次啟動後，會重新確認定位與前方鏡頭。", "waiting");
   el.cameraStatus.textContent = "影像待命";
   el.cameraAge.textContent = "--";
@@ -1004,6 +1048,12 @@ function stopDrive() {
   setSource("資料待命", "waiting");
   setRouteSummary("道路資料待命", "再次啟動後，將依 GPS 顯示國道、方向、里程與同向車道流況。", "定位已停止", "waiting");
   setObservation("即時道路資訊已停止", "影像不再自動更新。", "waiting");
+}
+
+function retryRoadData() {
+  if (!state.active || !state.lastPoint) return;
+  setSource("重新讀取道路資料", "waiting");
+  void refreshRoadInformation(state.lastPoint);
 }
 
 function refreshSettingsServiceStatus() {
@@ -1102,6 +1152,7 @@ el.clearDestination.addEventListener("click", clearDestination);
 el.cancelDestination.addEventListener("click", () => closeAppDialog(el.destinationDialog));
 el.startDrive.addEventListener("click", startDrive);
 el.stopDrive.addEventListener("click", stopDrive);
+el.retryRoadData.addEventListener("click", retryRoadData);
 window.setInterval(() => {
   updateImageAge();
   updateLaneDataAge();
@@ -1117,11 +1168,12 @@ renderTripPlan();
 // Camera positions rarely change. Keeping the last verified catalog lets a returning driver
 // select the direct official image even while a sleeping relay is warming up.
 hydratePersistedCctvList();
-if (state.proxyBase) {
-  window.addEventListener("load", () => {
-    void refreshCctvList().catch(() => {});
-  }, { once: true });
-}
+window.addEventListener("load", () => {
+  // Keep a same-origin catalogue ready before GPS starts selecting a road.
+  // This avoids making a live Relay request the only path to first use.
+  void hydrateBundledCctvList().catch(() => {});
+  if (state.proxyBase) void refreshCctvList().catch(() => {});
+}, { once: true });
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {}));

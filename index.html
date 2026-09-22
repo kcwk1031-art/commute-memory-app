@@ -23,6 +23,7 @@
     <section class="live-strip" aria-label="系統狀態">
       <span class="source-chip" id="sourceChip" data-level="waiting">資料待命</span>
       <strong id="locationState">定位未啟動</strong>
+      <button class="road-retry" id="retryRoadData" type="button" hidden>重試道路資料</button>
     </section>
 
     <section class="trip-plan" id="tripPlan" data-level="waiting" aria-label="行程規劃">
@@ -87,6 +88,7 @@
 
       <div class="camera-stage" id="cameraStage" data-state="waiting">
         <img id="cctvImage" alt="前方道路監視器影像" hidden>
+        <img id="cctvPreview" alt="" aria-hidden="true" hidden>
         <div class="camera-placeholder" id="cameraPlaceholder">
           <strong>尚未載入影像</strong>
           <small>啟動後將依定位選擇前方道路鏡頭</small>

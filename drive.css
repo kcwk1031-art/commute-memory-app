@@ -179,6 +179,21 @@ button { cursor: pointer; }
 .source-chip[data-level="warning"] { background: var(--amber-soft); color: var(--amber); }
 .source-chip[data-level="error"] { background: var(--red-soft); color: var(--red); }
 
+.road-retry {
+  margin-left: auto;
+  border: 1px solid var(--teal);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--teal-dark);
+  min-height: 32px;
+  padding: 5px 9px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.road-retry:active { background: var(--teal-soft); }
+
 .camera-panel {
   display: grid;
   gap: 8px;
@@ -232,19 +247,26 @@ button { cursor: pointer; }
   border-radius: inherit;
 }
 
-#cctvImage {
+#cctvImage,
+#cctvPreview {
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
   object-fit: contain;
   background: var(--camera);
 }
+#cctvImage { z-index: 2; }
+#cctvPreview { z-index: 1; }
 
 #cctvImage[hidden],
+#cctvPreview[hidden],
 .camera-placeholder[hidden],
 .camera-overlay[hidden] { display: none !important; }
 
 .camera-placeholder {
   position: absolute;
+  z-index: 3;
   inset: 0;
   display: grid;
   place-content: center;
@@ -258,6 +280,7 @@ button { cursor: pointer; }
 
 .camera-overlay {
   position: absolute;
+  z-index: 4;
   right: 8px;
   bottom: 8px;
   max-width: calc(100% - 16px);
