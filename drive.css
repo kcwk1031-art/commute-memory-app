@@ -95,6 +95,75 @@ button { cursor: pointer; }
   white-space: nowrap;
 }
 
+.trip-plan {
+  display: grid;
+  gap: 12px;
+  margin-right: -16px;
+  margin-left: -16px;
+  padding: 14px 16px 16px;
+  border-top: 1px solid #b8d6cd;
+  border-bottom: 1px solid #b8d6cd;
+  background: #edf7f2;
+}
+.trip-plan-heading {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.trip-plan-heading > div { min-width: 0; display: grid; gap: 3px; }
+.trip-plan-heading p,
+.trip-plan-heading small,
+.route-decision small,
+.route-facts dt,
+.route-facts small {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+.trip-plan-heading p { font-weight: 800; }
+.trip-plan-heading strong { font-size: 20px; line-height: 1.2; }
+.compact-action {
+  flex: 0 0 auto;
+  min-height: 36px;
+  padding: 6px 10px;
+  border: 1px solid #9bc8ba;
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--teal-dark);
+  font-size: 13px;
+  font-weight: 800;
+}
+.route-decision {
+  display: grid;
+  gap: 10px;
+  padding-left: 12px;
+  border-left: 4px solid #9bc8ba;
+}
+.route-decision-primary { display: grid; gap: 3px; }
+.route-decision-primary > span {
+  color: var(--teal-dark);
+  font-size: 12px;
+  font-weight: 800;
+}
+.route-decision-primary > strong { font-size: 18px; line-height: 1.22; }
+.route-facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 0;
+  border-top: 1px solid #cce0d7;
+  padding-top: 10px;
+}
+.route-facts > div { min-width: 0; display: grid; gap: 3px; }
+.route-facts > div + div { border-left: 1px solid #cce0d7; padding-left: 12px; }
+.route-facts dd { margin: 0; font-size: 20px; font-weight: 850; line-height: 1.1; }
+.trip-plan[data-level="warning"] { background: #fff8e8; border-color: #e5c27a; }
+.trip-plan[data-level="warning"] .route-decision { border-left-color: #d99a24; }
+.trip-plan[data-level="ready"] { background: #edf7f2; border-color: #83c1ae; }
+.trip-plan[data-level="ready"] .route-decision { border-left-color: var(--teal); }
+
 .source-chip {
   flex: 0 0 auto;
   min-height: 26px;
@@ -412,6 +481,7 @@ button { cursor: pointer; }
   color: var(--ink);
   background: var(--surface);
 }
+.destination-dialog { width: min(calc(100% - 32px), 440px); }
 .settings-dialog::backdrop { background: rgba(10, 23, 18, .48); }
 .settings-form { display: grid; gap: 16px; padding: 20px; }
 .settings-form h1 { margin: 4px 0 0; font-size: 24px; }
@@ -459,6 +529,9 @@ button { cursor: pointer; }
 
 @media (max-width: 359px) {
   .drive-shell { padding-right: 12px; padding-left: 12px; }
+  .trip-plan { margin-right: -12px; margin-left: -12px; padding-right: 12px; padding-left: 12px; }
+  .trip-plan-heading strong { font-size: 18px; }
+  .route-facts dd { font-size: 18px; }
   .lane-card-list { grid-template-columns: repeat(auto-fit, minmax(70px, 1fr)); gap: 6px; }
   .lane-card { padding-right: 7px; padding-left: 7px; }
   .lane-card-heading > span { font-size: 11px; }

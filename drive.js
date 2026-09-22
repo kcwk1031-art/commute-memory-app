@@ -42,6 +42,7 @@ const LOCATION_OPTIONS = { enableHighAccuracy: true, maximumAge: 1000, timeout: 
 const proxyStorageKey = "commute-cctv-proxy-base-v1";
 const relayStorageKey = "commute-cctv-relay-base-v1";
 const cameraCatalogStorageKey = "commute-cctv-catalog-v1";
+const destinationStorageKey = "commute-drive-destination-v1";
 const bundledCameraCatalogUrl = "./official-cctv-catalog.json";
 
 const el = {
@@ -64,6 +65,22 @@ const el = {
   routeSummary: document.querySelector("#routeSummary"),
   routeSummaryDetail: document.querySelector("#routeSummaryDetail"),
   routeSummaryState: document.querySelector("#routeSummaryState"),
+  tripPlan: document.querySelector("#tripPlan"),
+  destinationName: document.querySelector("#destinationName"),
+  destinationMeta: document.querySelector("#destinationMeta"),
+  routeDecision: document.querySelector("#routeDecision"),
+  routeDecisionDetail: document.querySelector("#routeDecisionDetail"),
+  routeEta: document.querySelector("#routeEta"),
+  routeEtaNote: document.querySelector("#routeEtaNote"),
+  routeAlternative: document.querySelector("#routeAlternative"),
+  routeAlternativeNote: document.querySelector("#routeAlternativeNote"),
+  editDestination: document.querySelector("#editDestination"),
+  destinationDialog: document.querySelector("#destinationDialog"),
+  destinationForm: document.querySelector("#destinationForm"),
+  destinationInput: document.querySelector("#destinationInput"),
+  saveDestination: document.querySelector("#saveDestination"),
+  clearDestination: document.querySelector("#clearDestination"),
+  cancelDestination: document.querySelector("#cancelDestination"),
   laneReference: document.querySelector("#laneReference"),
   laneReferenceTitle: document.querySelector("#laneReferenceTitle"),
   laneReferenceDetail: document.querySelector("#laneReferenceDetail"),
@@ -109,6 +126,7 @@ const state = {
   laneObservation: null,
   laneFetchedAt: 0,
   laneRequestToken: 0,
+  destination: normalizeDestination(localStorage.getItem(destinationStorageKey)),
   proxyBase: normalizeProxyBase(localStorage.getItem(proxyStorageKey)) || getDefaultProxyBase(),
   relayBase: normalizeRelayBase(localStorage.getItem(relayStorageKey)) || getDefaultRelayBase(),
 };
@@ -116,6 +134,10 @@ const state = {
 function normalizeProxyBase(value) {
   const base = String(value || "").trim().replace(/\/$/, "");
   return /^https:\/\//i.test(base) ? base : "";
+}
+
+function normalizeDestination(value) {
+  return String(value || "").replace(/\s+/g, " ").trim().slice(0, 100);
 }
 
 function normalizeRelayBase(value) {
@@ -156,6 +178,63 @@ function setRouteSummary(title, detail, stateLabel = "待確認", level = "waiti
   el.routeSummaryState.textContent = stateLabel;
   el.routeSummaryState.dataset.level = level;
   el.routeSummary.closest(".route-summary")?.setAttribute("data-level", level);
+}
+
+function renderTripPlan() {
+  if (!el.tripPlan) return;
+  const destination = state.destination;
+  if (!destination) {
+    el.tripPlan.dataset.level = "waiting";
+    el.destinationName.textContent = "尚未設定目的地";
+    el.destinationMeta.textContent = "設定目的地後，比較即時交通與替代路線。";
+    el.routeDecision.textContent = "等待目的地";
+    el.routeDecisionDetail.textContent = "尚未取得目的地，因此不比較路線。";
+    el.routeEta.textContent = "--";
+    el.routeEtaNote.textContent = "尚未計算";
+    el.routeAlternative.textContent = "--";
+    el.routeAlternativeNote.textContent = "尚未比較";
+    el.editDestination.textContent = "設定";
+    return;
+  }
+
+  el.tripPlan.dataset.level = "warning";
+  el.destinationName.textContent = destination;
+  el.destinationMeta.textContent = "目的地已儲存於此裝置。";
+  el.routeDecision.textContent = "等待即時導航服務";
+  el.routeDecisionDetail.textContent = "尚未取得交通感知 ETA 與替代路線，不提供改道建議。";
+  el.routeEta.textContent = "--";
+  el.routeEtaNote.textContent = "服務待串接";
+  el.routeAlternative.textContent = "--";
+  el.routeAlternativeNote.textContent = "不建議改道";
+  el.editDestination.textContent = "編輯";
+}
+
+function openDestinationDialog() {
+  el.destinationInput.value = state.destination;
+  el.destinationDialog.showModal();
+  window.setTimeout(() => el.destinationInput.focus(), 0);
+}
+
+function saveDestination() {
+  const destination = normalizeDestination(el.destinationInput.value);
+  if (!destination) {
+    el.destinationInput.setCustomValidity("請輸入目的地名稱或地址。");
+    el.destinationInput.reportValidity();
+    return;
+  }
+  el.destinationInput.setCustomValidity("");
+  state.destination = destination;
+  localStorage.setItem(destinationStorageKey, destination);
+  renderTripPlan();
+  el.destinationDialog.close();
+}
+
+function clearDestination() {
+  state.destination = "";
+  localStorage.removeItem(destinationStorageKey);
+  el.destinationInput.value = "";
+  renderTripPlan();
+  el.destinationDialog.close();
 }
 
 function setLaneReference(title, detail, level = "waiting") {
@@ -992,6 +1071,15 @@ el.openSettings.addEventListener("click", () => {
 });
 el.saveSettings.addEventListener("click", saveProxySetting);
 el.resetSettings.addEventListener("click", resetServiceSettings);
+el.editDestination.addEventListener("click", openDestinationDialog);
+el.destinationForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  saveDestination();
+});
+el.destinationInput.addEventListener("input", () => el.destinationInput.setCustomValidity(""));
+el.saveDestination.addEventListener("click", saveDestination);
+el.clearDestination.addEventListener("click", clearDestination);
+el.cancelDestination.addEventListener("click", () => el.destinationDialog.close());
 el.startDrive.addEventListener("click", startDrive);
 el.stopDrive.addEventListener("click", stopDrive);
 window.setInterval(() => {
@@ -1003,6 +1091,8 @@ if (!state.proxyBase) {
   setSource("影像服務未設定", "warning");
   setObservation("請先設定影像服務", "設定完成後，才會讀取定位並載入前方道路影像。", "warning");
 }
+
+renderTripPlan();
 
 // Camera positions rarely change. Keeping the last verified catalog lets a returning driver
 // select the direct official image even while a sleeping relay is warming up.

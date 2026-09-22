@@ -25,6 +25,36 @@
       <strong id="locationState">定位未啟動</strong>
     </section>
 
+    <section class="trip-plan" id="tripPlan" data-level="waiting" aria-label="行程規劃">
+      <div class="trip-plan-heading">
+        <div>
+          <p>行程規劃</p>
+          <strong id="destinationName">尚未設定目的地</strong>
+          <small id="destinationMeta">設定目的地後，比較即時交通與替代路線。</small>
+        </div>
+        <button class="compact-action" id="editDestination" type="button">設定</button>
+      </div>
+      <div class="route-decision">
+        <div class="route-decision-primary">
+          <span>路線建議</span>
+          <strong id="routeDecision">等待目的地</strong>
+          <small id="routeDecisionDetail">尚未取得目的地，因此不比較路線。</small>
+        </div>
+        <dl class="route-facts" aria-label="路線預估資訊">
+          <div>
+            <dt>預估抵達</dt>
+            <dd id="routeEta">--</dd>
+            <small id="routeEtaNote">尚未計算</small>
+          </div>
+          <div>
+            <dt>替代方案</dt>
+            <dd id="routeAlternative">--</dd>
+            <small id="routeAlternativeNote">尚未比較</small>
+          </div>
+        </dl>
+      </div>
+    </section>
+
     <section class="route-summary" aria-label="道路與方向判讀">
       <div>
         <p>目前道路</p>
@@ -135,6 +165,25 @@
         <button class="secondary-action" id="resetSettings" type="button">使用預設</button>
         <button class="secondary-action" value="cancel">取消</button>
         <button class="primary-action" id="saveSettings" value="default">保存設定</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog class="settings-dialog destination-dialog" id="destinationDialog">
+    <form class="settings-form" id="destinationForm">
+      <div>
+        <p class="dialog-eyebrow">行程規劃</p>
+        <h1>設定目的地</h1>
+      </div>
+      <label>
+        目的地名稱或地址
+        <input id="destinationInput" type="text" autocomplete="street-address" enterkeyhint="done" maxlength="100" placeholder="例如：楊梅公司">
+      </label>
+      <p class="dialog-note">目的地只儲存在此裝置。即時 ETA 與替代路線會在導航服務完成串接後啟用。</p>
+      <div class="dialog-actions dialog-actions-three">
+        <button class="secondary-action" id="clearDestination" type="button">清除</button>
+        <button class="secondary-action" id="cancelDestination" type="button">取消</button>
+        <button class="primary-action" id="saveDestination" type="button">儲存</button>
       </div>
     </form>
   </dialog>
