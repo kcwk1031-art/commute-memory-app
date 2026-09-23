@@ -11,6 +11,7 @@ import {
   matchRoadCorridor,
   normalizeDirectionCode,
 } from "./drive-direction.js";
+import { resolveDestinationIntent } from "./drive-destination.js";
 import { buildLaneGuidance } from "./drive-guidance.js";
 
 const TDX_CCTV_URL = "https://tdx.transportdata.tw/api/basic/v2/Road/Traffic/CCTV/Freeway?$format=JSON";
@@ -20,6 +21,7 @@ const ROAD_REFRESH_MS = 15 * 1000;
 const LANE_REFRESH_MS = 60 * 1000;
 const MAX_CAMERA_DISTANCE_METERS = 5000;
 const CAMERA_SWITCH_METERS = 500;
+const DESTINATION_CANDIDATE_MAX_DISTANCE_METERS = 15000;
 const CAMERA_BEARING_MAX_DELTA = 85;
 const CAMERA_DIRECTION_MAX_DELTA = 75;
 const RAMP_CAMERA_PENALTY = 650;
@@ -131,6 +133,8 @@ const state = {
   laneObservation: null,
   laneFetchedAt: 0,
   laneRequestToken: 0,
+  prefetchedLaneObservations: new Map(),
+  prefetchLaneRequests: new Set(),
   destination: normalizeDestination(localStorage.getItem(destinationStorageKey)),
   proxyBase: normalizeProxyBase(localStorage.getItem(proxyStorageKey)) || getDefaultProxyBase(),
   relayBase: normalizeRelayBase(localStorage.getItem(relayStorageKey)) || getDefaultRelayBase(),
@@ -250,6 +254,7 @@ function saveDestination() {
   state.destination = destination;
   localStorage.setItem(destinationStorageKey, destination);
   renderTripPlan();
+  if (state.lastPoint) void refreshRoadInformation(state.lastPoint);
   closeAppDialog(el.destinationDialog);
 }
 
@@ -258,6 +263,7 @@ function clearDestination() {
   localStorage.removeItem(destinationStorageKey);
   el.destinationInput.value = "";
   renderTripPlan();
+  if (state.lastPoint) void refreshRoadInformation(state.lastPoint);
   closeAppDialog(el.destinationDialog);
 }
 
@@ -368,6 +374,51 @@ function roadKey(camera) {
 
 function isRampCamera(camera) {
   return /匝道|入口|出口|引道|連絡道/.test(String(camera.section || ""));
+}
+
+function selectDestinationCandidateCamera(point, intent) {
+  if (!intent || !state.cctvs.length) return null;
+  return state.cctvs
+    .filter((camera) => intent.routes.includes(cameraRouteKey(camera)))
+    .filter((camera) => normalizeDirectionCode(camera.direction, camera.id) === intent.direction)
+    .filter((camera) => !isRampCamera(camera))
+    .map((camera) => ({ ...camera, distance: distanceBetween(point, camera) }))
+    .filter((camera) => camera.distance <= DESTINATION_CANDIDATE_MAX_DISTANCE_METERS)
+    .sort((left, right) => left.distance - right.distance)[0] || null;
+}
+
+function readPrefetchedLaneObservation(cameraId) {
+  const cached = state.prefetchedLaneObservations.get(cameraId);
+  if (!cached) return null;
+  if (Date.now() - cached.fetchedAt >= LANE_REFRESH_MS) {
+    state.prefetchedLaneObservations.delete(cameraId);
+    return null;
+  }
+  return cached.observation;
+}
+
+function prefetchLaneObservation(camera) {
+  if (!state.proxyBase || !camera?.id) return;
+  if (readPrefetchedLaneObservation(camera.id) || state.prefetchLaneRequests.has(camera.id)) return;
+  state.prefetchLaneRequests.add(camera.id);
+  void timeoutFetch(`${state.proxyBase}/v1/lanes/${encodeURIComponent(camera.id)}`, { cache: "no-store" }, 12000)
+    .then(async (response) => {
+      const observation = await response.json().catch(() => ({ ok: false, error: "lane_response_invalid" }));
+      state.prefetchedLaneObservations.set(camera.id, {
+        fetchedAt: Date.now(),
+        observation: response.ok ? observation : { ...observation, ok: false },
+      });
+    })
+    .catch(() => {})
+    .finally(() => state.prefetchLaneRequests.delete(camera.id));
+}
+
+function prepareDestinationCandidate(point) {
+  const intent = resolveDestinationIntent(state.destination, point);
+  if (!intent || !state.cctvs.length) return null;
+  const camera = selectDestinationCandidateCamera(point, intent);
+  if (camera) prefetchLaneObservation(camera);
+  return { intent, camera };
 }
 
 function timeoutFetch(url, options = {}, timeout = 8000) {
@@ -656,6 +707,7 @@ async function refreshLaneObservation(camera) {
     updateLaneDataAge();
     return;
   }
+  const prefetched = readPrefetchedLaneObservation(camera.id);
   const token = ++state.laneRequestToken;
   if (!isCurrent) {
     state.laneCameraId = camera.id;
@@ -663,6 +715,11 @@ async function refreshLaneObservation(camera) {
     clearLaneCards();
     el.laneDataAge.textContent = "讀取中";
     setLaneReference("正在讀取官方 VD", "正在比對同向主線偵測器的每車道資料。", "waiting");
+  }
+  if (prefetched) {
+    state.laneFetchedAt = Date.now();
+    renderLaneObservation(prefetched);
+    return;
   }
   try {
     const response = await timeoutFetch(`${state.proxyBase}/v1/lanes/${encodeURIComponent(camera.id)}`, { cache: "no-store" }, 12000);
@@ -878,15 +935,31 @@ async function refreshRoadInformation(point) {
     pauseRoadDataForLowAccuracy(point);
     return;
   }
-  const course = state.course && point.timestamp - state.course.updatedAt <= COURSE_HOLD_MS ? state.course : null;
+  let course;
+  try {
+    await getCctvList();
+    course = state.course && point.timestamp - state.course.updatedAt <= COURSE_HOLD_MS ? state.course : null;
+  } catch (error) {
+    setSource("CCTV 清單失敗", "error");
+    setRouteSummary("道路資料暫不可用", "目前無法讀取鏡頭目錄；保留既有道路資訊並在下一次定位時重試。", "讀取失敗", "error");
+    setObservation("道路資料暫不可用", error.name === "AbortError" ? "讀取逾時，將在下一次定位更新時重試。" : "無法讀取 CCTV 清單，請確認網路後重試。", "error");
+    return;
+  }
   if (!course || !Number.isFinite(course.heading)) {
+    const candidate = prepareDestinationCandidate(point);
     state.laneRequestToken += 1;
     state.laneCameraId = "";
     state.laneObservation = null;
     clearLaneCards();
     el.laneDataAge.textContent = "--";
-    setLaneReference("等待實際行駛方向", "需要累積足夠的 GPS 移動距離後，才會比對同向主線的官方車道速度資料。", "waiting");
-    setSource("方向確認中", "warning");
+    setLaneReference(
+      candidate ? `${candidate.intent.directionLabel}候選已預載` : "等待實際行駛方向",
+      candidate
+        ? `目的地「${state.destination}」已預讀 ${candidate.intent.corridorLabel} 的候選資料；GPS 確認主線後才會顯示正式同向車道速度。`
+        : "需要累積足夠的 GPS 移動距離後，才會比對同向主線的官方車道速度資料。",
+      "waiting",
+    );
+    setSource(candidate ? `${candidate.intent.directionLabel}候選預載` : "方向確認中", candidate ? "reference" : "warning");
     if (state.displayedCamera && !el.cctvImage.hidden) {
       setRouteSummary(
         `${state.displayedCamera.road} ${directionLabel(state.displayedCamera.direction, state.displayedCamera.id)} 主線`,
@@ -896,17 +969,33 @@ async function refreshRoadInformation(point) {
       );
       setObservation("持續確認行駛方向", "保留已確認影像；未取得連續 GPS 航向前不切換到其他方向的鏡頭。", "warning");
     } else {
-      el.roadLabel.textContent = "正在確認實際行駛方向";
-      el.roadDetail.textContent = "累積 GPS 移動距離後，才會選擇同向前方鏡頭。";
+      el.roadLabel.textContent = candidate ? `${candidate.intent.corridorLabel} 候選已預載` : "正在確認實際行駛方向";
+      el.roadDetail.textContent = candidate
+        ? `目的地「${state.destination}」預判；正在以 GPS 航向確認實際主線。`
+        : "累積 GPS 移動距離後，才會選擇同向前方鏡頭。";
       el.cameraDistance.textContent = "--";
-      setRouteSummary("道路走廊待確認", "累積約 32 至 90 公尺的 GPS 連續移動後，才會顯示道路、方向與車道資料。", "方向確認中", "waiting");
-      setCameraPlaceholder("正在確認行駛方向", "車輛移動一小段距離後，系統才會載入同向前方影像。", "waiting");
-      setObservation("等待 GPS 連續定位", "尚未取得可判定的實際航向，因此不顯示可能反向的鏡頭。", "warning");
+      setRouteSummary(
+        candidate ? `${candidate.intent.corridorLabel} 候選走廊已預載` : "道路走廊待確認",
+        candidate
+          ? `${candidate.camera ? `最近候選主線約 ${formatDistance(candidate.camera.distance)}；` : ""}GPS 航向確認後，立即切換為同向前方影像與官方 VD。`
+          : "累積約 32 至 90 公尺的 GPS 連續移動後，才會顯示道路、方向與車道資料。",
+        candidate ? "GPS確認中" : "方向確認中",
+        candidate ? "reference" : "waiting",
+      );
+      setCameraPlaceholder(
+        candidate ? "已預載候選道路資料" : "正在確認行駛方向",
+        candidate ? "正在以 GPS 航向確認主線；不會先顯示可能反向的畫面。" : "車輛移動一小段距離後，系統才會載入同向前方影像。",
+        "waiting",
+      );
+      setObservation(
+        candidate ? "目的地候選走廊已預載" : "等待 GPS 連續定位",
+        candidate ? `已依目的地「${state.destination}」預讀 ${candidate.intent.corridorLabel}；正式道路與車道資訊仍須 GPS 航向確認。` : "尚未取得可判定的實際航向，因此不顯示可能反向的鏡頭。",
+        candidate ? "reference" : "warning",
+      );
     }
     return;
   }
   try {
-    await getCctvList();
     const selected = selectForwardCamera(point, course);
     if (!selected) {
       setSource("前方無可確認鏡頭", "warning");
@@ -1007,6 +1096,8 @@ function startDrive() {
   state.displayedCamera = null;
   resetCourse();
   state.active = true;
+  // Start from the bundled catalog before the first GPS callback so destination candidates can be prepared immediately.
+  void getCctvList().catch(() => {});
   el.startDrive.hidden = true;
   el.stopDrive.hidden = false;
   el.locationState.textContent = "正在確認定位";
