@@ -691,6 +691,24 @@ function selectForwardCamera(point, course) {
   return candidates.find((camera) => camera.distance >= CAMERA_SWITCH_METERS) || candidates[0] || null;
 }
 
+function selectNearbyReferenceCamera(point) {
+  const candidates = state.cctvs
+    .map((camera) => ({ ...camera, distance: distanceBetween(point, camera) }))
+    .filter((camera) => camera.distance <= MAX_CAMERA_DISTANCE_METERS * 2)
+    .filter((camera) => !isRampCamera(camera))
+    .sort((a, b) => a.distance - b.distance);
+  const camera = candidates[0];
+  if (!camera) return null;
+  return {
+    ...camera,
+    bearingDelta: NaN,
+    routeHeading: NaN,
+    directionDelta: NaN,
+    corridor: null,
+    isReferenceFallback: true,
+  };
+}
+
 function streamSources(camera) {
   const sources = [];
   const officialUrl = String(camera.mediaUrl || "").trim();
@@ -989,8 +1007,13 @@ async function refreshRoadInformation(point) {
     setObservation("道路資料暫不可用", error.name === "AbortError" ? "讀取逾時，將在下一次定位更新時重試。" : "無法讀取 CCTV 清單，請確認網路後重試。", "error");
     return;
   }
+  if (!state.laneObservation && !state.laneCameraId) {
+    el.laneDataAge.textContent = "更新中";
+    setLaneReference("正在確認同向偵測器", "定位已更新；正在比對前方鏡頭與官方 VD。", "waiting");
+  }
   if (!course || !Number.isFinite(course.heading)) {
     const candidate = prepareDestinationCandidate(point);
+    const nearbyReference = selectNearbyReferenceCamera(point);
     state.laneRequestToken += 1;
     state.laneCameraId = "";
     state.laneObservation = null;
@@ -1004,7 +1027,22 @@ async function refreshRoadInformation(point) {
       "waiting",
     );
     setSource(candidate ? `${candidate.intent.directionLabel}候選預載` : "方向確認中", candidate ? "reference" : "warning");
-    if (state.displayedCamera && !el.cctvImage.hidden) {
+    if (nearbyReference) {
+      const changed = nearbyReference.id !== state.currentCamera?.id;
+      state.currentCamera = nearbyReference;
+      if (!state.displayedCamera || state.displayedCamera.id === nearbyReference.id) renderCameraContext(nearbyReference);
+      renderRouteSummary(nearbyReference, false);
+      setSource("附近道路影像參考", "reference");
+      setObservation("附近道路影像參考", "GPS 航向仍在確認；先顯示最近非匝道的道路影像，不提供方向、車道速度或車道建議。", "reference");
+      if (changed || !state.imageLoadedAt) {
+        try {
+          loadCameraStream(nearbyReference);
+        } catch (error) {
+          console.error("Nearby camera reference initialization failed", error);
+          setCameraPlaceholder("影像重新連線中", "正在改用備援影像來源。", "waiting");
+        }
+      }
+    } else if (state.displayedCamera && !el.cctvImage.hidden) {
       setRouteSummary(
         `${state.displayedCamera.road} ${directionLabel(state.displayedCamera.direction, state.displayedCamera.id)} 主線`,
         "正在重新確認 GPS 連續航向，暫停更新道路與車道推薦。",
@@ -1040,7 +1078,15 @@ async function refreshRoadInformation(point) {
     return;
   }
   try {
-    const selected = selectForwardCamera(point, course);
+    let selected;
+    let selectionError = null;
+    try {
+      selected = selectForwardCamera(point, course);
+    } catch (error) {
+      selectionError = error;
+      console.error("Precise road matching failed; using nearby camera reference", error);
+      selected = selectNearbyReferenceCamera(point);
+    }
     if (!selected) {
       setSource("前方無可確認鏡頭", "warning");
       if (state.displayedCamera && !el.cctvImage.hidden) {
@@ -1066,12 +1112,13 @@ async function refreshRoadInformation(point) {
     state.currentCamera = selected;
     if (!state.displayedCamera || state.displayedCamera.id === selected.id) renderCameraContext(selected);
     const corridorVerified = !selected.corridor || ["high", "medium"].includes(selected.corridor.confidence);
-    const directionVerified = Number.isFinite(selected.routeHeading) && Number.isFinite(selected.directionDelta) && corridorVerified;
+    const directionVerified = !selectionError && !selected.isReferenceFallback
+      && Number.isFinite(selected.routeHeading) && Number.isFinite(selected.directionDelta) && corridorVerified;
     renderRouteSummary(selected, directionVerified);
-    setSource(directionVerified ? "同向前方影像" : "前方影像參考", directionVerified ? "live" : "reference");
-    setObservation("前方道路影像", directionVerified
+    setSource(directionVerified ? "同向前方影像" : "附近道路影像參考", directionVerified ? "live" : "reference");
+    setObservation(directionVerified ? "前方道路影像" : "附近道路影像參考", directionVerified
       ? `${selected.corridor ? "道路走廊與 GPS 航向已比對" : "GPS 實際行駛方向已比對"} ${selected.road} ${directionLabel(selected.direction, selected.id)} 主線；已選擇 ${formatDistance(selected.distance)} 前方鏡頭。`
-      : "已取得 GPS 行駛方向，但鏡頭道路方向資料不足，僅作前方影像參考。", "reference");
+      : "精準道路比對仍在背景重試；目前先顯示最近非匝道的道路影像參考，不提供車道速度或車道建議。", "reference");
     if (changed || !state.imageLoadedAt) {
       try {
         loadCameraStream(selected);
