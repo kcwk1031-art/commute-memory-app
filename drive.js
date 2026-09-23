@@ -13,6 +13,7 @@ import {
 } from "./drive-direction.js";
 import { resolveDestinationIntent } from "./drive-destination.js";
 import { buildLaneGuidance } from "./drive-guidance.js";
+import { STARTER_CCTV } from "./drive-starter-catalog.js";
 
 const TDX_CCTV_URL = "https://tdx.transportdata.tw/api/basic/v2/Road/Traffic/CCTV/Freeway?$format=JSON";
 const CAMERA_CATALOG_REFRESH_MS = 15 * 60 * 1000;
@@ -476,6 +477,14 @@ function hydratePersistedCctvList() {
 function hydrateBundledCctvList() {
   if (state.cctvs.length) return Promise.resolve(state.cctvs);
   if (state.cctvSeedLoad) return state.cctvSeedLoad;
+  const starterCctvs = normalizeCctvList(STARTER_CCTV);
+  if (starterCctvs.length) {
+    // Keep the initial New Taipei-to-Yangmei corridor independent from a large catalog parse or Relay availability.
+    state.cctvs = starterCctvs;
+    state.cctvsLoadedAt = 0;
+    persistCctvList(starterCctvs, Date.now());
+    return Promise.resolve(starterCctvs);
+  }
   const inlineCatalog = document.querySelector(`#${inlineCameraCatalogId}`)?.textContent?.trim();
   if (inlineCatalog) {
     try {
