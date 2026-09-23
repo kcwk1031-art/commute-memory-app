@@ -44,6 +44,7 @@ const relayStorageKey = "commute-cctv-relay-base-v1";
 const cameraCatalogStorageKey = "commute-cctv-catalog-v1";
 const destinationStorageKey = "commute-drive-destination-v1";
 const bundledCameraCatalogUrl = "./official-cctv-catalog.json";
+const inlineCameraCatalogId = "bundledCameraCatalog";
 
 const el = {
   locationState: document.querySelector("#locationState"),
@@ -424,6 +425,21 @@ function hydratePersistedCctvList() {
 function hydrateBundledCctvList() {
   if (state.cctvs.length) return Promise.resolve(state.cctvs);
   if (state.cctvSeedLoad) return state.cctvSeedLoad;
+  const inlineCatalog = document.querySelector(`#${inlineCameraCatalogId}`)?.textContent?.trim();
+  if (inlineCatalog) {
+    try {
+      const payload = JSON.parse(inlineCatalog);
+      const cctvs = normalizeCctvList(payload.cameras || []);
+      if (cctvs.length) {
+        state.cctvs = cctvs;
+        state.cctvsLoadedAt = 0;
+        persistCctvList(cctvs, Date.now());
+        return Promise.resolve(cctvs);
+      }
+    } catch (_) {
+      // Continue to the standalone catalog when an embedded payload is incomplete.
+    }
+  }
   state.cctvSeedLoad = fetch(bundledCameraCatalogUrl, { cache: "force-cache" })
     .then(async (response) => {
       if (!response.ok) throw new Error(`內建鏡頭目錄讀取失敗 (${response.status})`);
