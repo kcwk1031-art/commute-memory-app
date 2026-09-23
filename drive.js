@@ -133,6 +133,7 @@ const state = {
   laneObservation: null,
   laneFetchedAt: 0,
   laneRequestToken: 0,
+  roadRequestToken: 0,
   prefetchedLaneObservations: new Map(),
   prefetchLaneRequests: new Set(),
   destination: normalizeDestination(localStorage.getItem(destinationStorageKey)),
@@ -734,7 +735,7 @@ function renderRouteSummary(camera, directionVerified) {
   setRouteSummary(road, `${mile}｜鏡頭方向資料待進一步確認`, "影像參考", "reference");
 }
 
-async function refreshLaneObservation(camera) {
+async function refreshLaneObservation(camera, roadToken = state.roadRequestToken) {
   if (!getProxyBases().length || !camera?.id) return;
   const isCurrent = state.laneCameraId === camera.id;
   if (isCurrent && Date.now() - state.laneFetchedAt < LANE_REFRESH_MS) {
@@ -758,11 +759,11 @@ async function refreshLaneObservation(camera) {
   try {
     const response = await fetchFromServiceBases(getProxyBases(), `/v1/lanes/${encodeURIComponent(camera.id)}`, { cache: "no-store" }, 12000);
     const observation = await response.json().catch(() => ({ ok: false, error: "lane_response_invalid" }));
-    if (token !== state.laneRequestToken || camera.id !== state.currentCamera?.id) return;
+    if (roadToken !== state.roadRequestToken || token !== state.laneRequestToken || camera.id !== state.currentCamera?.id) return;
     state.laneFetchedAt = Date.now();
     renderLaneObservation(response.ok ? observation : { ...observation, ok: false });
   } catch (_) {
-    if (token !== state.laneRequestToken || camera.id !== state.currentCamera?.id) return;
+    if (roadToken !== state.roadRequestToken || token !== state.laneRequestToken || camera.id !== state.currentCamera?.id) return;
     state.laneFetchedAt = Date.now();
     renderLaneObservation({ ok: false, error: "lane_request_failed" });
   }
@@ -970,6 +971,8 @@ function loadCameraStream(camera, isReconnect = false, sourceIndex = 0) {
 }
 
 async function refreshRoadInformation(point) {
+  const roadToken = ++state.roadRequestToken;
+  const isCurrentRequest = () => roadToken === state.roadRequestToken;
   if (Number(point?.accuracy) > MAX_LOCATION_ACCURACY_METERS) {
     pauseRoadDataForLowAccuracy(point);
     return;
@@ -977,8 +980,10 @@ async function refreshRoadInformation(point) {
   let course;
   try {
     await getCctvList();
+    if (!isCurrentRequest()) return;
     course = state.course && point.timestamp - state.course.updatedAt <= COURSE_HOLD_MS ? state.course : null;
   } catch (error) {
+    if (!isCurrentRequest()) return;
     setSource("CCTV 清單失敗", "error");
     setRouteSummary("道路資料暫不可用", "目前無法讀取鏡頭目錄；保留既有道路資訊並在下一次定位時重試。", "讀取失敗", "error");
     setObservation("道路資料暫不可用", error.name === "AbortError" ? "讀取逾時，將在下一次定位更新時重試。" : "無法讀取 CCTV 清單，請確認網路後重試。", "error");
@@ -1076,8 +1081,9 @@ async function refreshRoadInformation(point) {
         el.cameraStatus.textContent = "影像連線重試中";
       }
     }
-    if (directionVerified) void refreshLaneObservation(selected);
+    if (directionVerified) void refreshLaneObservation(selected, roadToken);
   } catch (error) {
+    if (!isCurrentRequest()) return;
     setSource("道路判讀暫不可用", "error");
     setRouteSummary("道路資料暫不可用", "目前無法完成前方鏡頭比對；保留既有道路資訊並在下一次定位時重試。", "判讀重試中", "error");
     setObservation("道路判讀暫不可用", error.name === "AbortError" ? "道路比對逾時，將在下一次定位更新時重試。" : "前方鏡頭道路比對暫時失敗，系統會自動重試。", "error");
@@ -1094,6 +1100,8 @@ function handlePosition(position) {
     timestamp: Number(position.timestamp) || Date.now(),
   };
   const speed = deriveSpeed(point);
+  if (state.lastPoint && point.timestamp < state.lastPoint.timestamp) return;
+  state.lastPoint = point;
   el.locationState.textContent = `${point.accuracy <= MAX_LOCATION_ACCURACY_METERS ? "定位正常" : "定位精度不足"}｜誤差 ${Math.round(point.accuracy)} m`;
   el.locationAccuracy.textContent = String(Math.round(point.accuracy));
   el.gpsSpeed.textContent = Number.isFinite(speed.value) ? String(speed.value) : "--";
@@ -1102,7 +1110,6 @@ function handlePosition(position) {
     el.travelDirection.textContent = "--";
     el.travelDirectionNote.textContent = `需在 ${MAX_LOCATION_ACCURACY_METERS} m 內`;
     pauseRoadDataForLowAccuracy(point);
-    state.lastPoint = point;
     return;
   }
   const course = updateCourse(point);
@@ -1111,7 +1118,6 @@ function handlePosition(position) {
     ? `${course.source}${course.distance ? `｜${Math.round(course.distance)} m` : ""}`
     : "累積移動距離中";
   void refreshRoadInformation(point);
-  state.lastPoint = point;
 }
 
 function handleLocationError(error) {

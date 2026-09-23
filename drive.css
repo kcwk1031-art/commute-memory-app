@@ -51,6 +51,7 @@ button { cursor: pointer; }
 }
 
 .brand-block { display: grid; gap: 2px; }
+.brand-title-row { display: flex; align-items: baseline; gap: 7px; }
 .brand-block p,
 .dialog-eyebrow {
   margin: 0;
@@ -59,6 +60,12 @@ button { cursor: pointer; }
   font-weight: 800;
 }
 .brand-block strong { font-size: 22px; line-height: 1.15; }
+.app-version {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1;
+}
 
 .quiet-button,
 .secondary-action,
