@@ -1,4 +1,4 @@
-const SHELL_CACHE = "commute-drive-shell-v20";
+const SHELL_CACHE = "commute-drive-shell-v21";
 const SHELL_FILES = ["./", "./index.html", "./drive.css", "./drive.js", "./drive-destination.js", "./drive-direction.js", "./drive-guidance.js", "./drive-starter-catalog.js", "./drive-config.js", "./official-cctv-catalog.json", "./manifest.webmanifest"];
 
 self.addEventListener("install", (event) => {

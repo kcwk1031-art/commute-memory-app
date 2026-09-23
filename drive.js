@@ -47,7 +47,6 @@ const relayStorageKey = "commute-cctv-relay-base-v1";
 const cameraCatalogStorageKey = "commute-cctv-catalog-v1";
 const destinationStorageKey = "commute-drive-destination-v1";
 const bundledCameraCatalogUrl = "./official-cctv-catalog.json";
-const inlineCameraCatalogId = "bundledCameraCatalog";
 
 const el = {
   locationState: document.querySelector("#locationState"),
@@ -168,6 +167,15 @@ function getDefaultProxyBase() {
 
 function getDefaultRelayBase() {
   return normalizeRelayBase(window.DRIVE_CONFIG?.cctvRelayBase || "");
+}
+
+function getProxyBases() {
+  return [...new Set([state.proxyBase, getDefaultProxyBase()].filter(Boolean))];
+}
+
+function getRelayBases() {
+  // A stale custom value must not block a driver from the configured production Relay.
+  return [...new Set([state.relayBase, getDefaultRelayBase()].filter(Boolean))];
 }
 
 function setSource(label, level = "waiting") {
@@ -374,7 +382,7 @@ function roadKey(camera) {
 }
 
 function isRampCamera(camera) {
-  return /匝道|入口|出口|引道|連絡道/.test(String(camera.section || ""));
+  return /匝道|入口|出口|引道|連絡道/.test(`${camera.id || ""} ${camera.section || ""}`);
 }
 
 function selectDestinationCandidateCamera(point, intent) {
@@ -399,10 +407,10 @@ function readPrefetchedLaneObservation(cameraId) {
 }
 
 function prefetchLaneObservation(camera) {
-  if (!state.proxyBase || !camera?.id) return;
+  if (!getProxyBases().length || !camera?.id) return;
   if (readPrefetchedLaneObservation(camera.id) || state.prefetchLaneRequests.has(camera.id)) return;
   state.prefetchLaneRequests.add(camera.id);
-  void timeoutFetch(`${state.proxyBase}/v1/lanes/${encodeURIComponent(camera.id)}`, { cache: "no-store" }, 12000)
+  void fetchFromServiceBases(getProxyBases(), `/v1/lanes/${encodeURIComponent(camera.id)}`, { cache: "no-store" }, 12000)
     .then(async (response) => {
       const observation = await response.json().catch(() => ({ ok: false, error: "lane_response_invalid" }));
       state.prefetchedLaneObservations.set(camera.id, {
@@ -426,6 +434,20 @@ function timeoutFetch(url, options = {}, timeout = 8000) {
   const controller = new AbortController();
   const timer = window.setTimeout(() => controller.abort(), timeout);
   return fetch(url, { ...options, signal: controller.signal }).finally(() => window.clearTimeout(timer));
+}
+
+async function fetchFromServiceBases(bases, path, options = {}, timeout = 8000) {
+  let lastError = new Error("影像服務尚未設定");
+  for (const base of bases) {
+    try {
+      const response = await timeoutFetch(`${base}${path}`, options, timeout);
+      if (response.ok) return response;
+      lastError = new Error(`服務讀取失敗 (${response.status})`);
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError;
 }
 
 function normalizeCctvList(rawCameras) {
@@ -485,21 +507,6 @@ function hydrateBundledCctvList() {
     persistCctvList(starterCctvs, Date.now());
     return Promise.resolve(starterCctvs);
   }
-  const inlineCatalog = document.querySelector(`#${inlineCameraCatalogId}`)?.textContent?.trim();
-  if (inlineCatalog) {
-    try {
-      const payload = JSON.parse(inlineCatalog);
-      const cctvs = normalizeCctvList(payload.cameras || []);
-      if (cctvs.length) {
-        state.cctvs = cctvs;
-        state.cctvsLoadedAt = 0;
-        persistCctvList(cctvs, Date.now());
-        return Promise.resolve(cctvs);
-      }
-    } catch (_) {
-      // Continue to the standalone catalog when an embedded payload is incomplete.
-    }
-  }
   state.cctvSeedLoad = fetch(bundledCameraCatalogUrl, { cache: "force-cache" })
     .then(async (response) => {
       if (!response.ok) throw new Error(`內建鏡頭目錄讀取失敗 (${response.status})`);
@@ -521,12 +528,15 @@ function hydrateBundledCctvList() {
 
 function refreshCctvList() {
   if (state.cctvCatalogRefresh) return state.cctvCatalogRefresh;
-  const listUrl = state.proxyBase ? `${state.proxyBase}/v1/cameras` : TDX_CCTV_URL;
-  state.cctvCatalogRefresh = timeoutFetch(listUrl, { cache: "no-store" })
+  const proxyBases = getProxyBases();
+  const request = proxyBases.length
+    ? fetchFromServiceBases(proxyBases, "/v1/cameras", { cache: "no-store" })
+    : timeoutFetch(TDX_CCTV_URL, { cache: "no-store" });
+  state.cctvCatalogRefresh = request
     .then(async (response) => {
       if (!response.ok) throw new Error(`CCTV 清單讀取失敗 (${response.status})`);
       const payload = await response.json();
-      const rawCameras = state.proxyBase ? (payload.cameras || []) : (payload.CCTVs || []);
+      const rawCameras = proxyBases.length ? (payload.cameras || []) : (payload.CCTVs || []);
       const cctvs = normalizeCctvList(rawCameras);
       if (!cctvs.length) throw new Error("CCTV 清單沒有可用鏡頭");
       state.cctvs = cctvs;
@@ -682,12 +692,25 @@ function streamSources(camera) {
   const sources = [];
   const officialUrl = String(camera.mediaUrl || "").trim();
   if (/^https:\/\//i.test(officialUrl)) sources.push({ kind: "official", label: "官方原生串流", url: officialUrl });
-  if (state.relayBase) sources.push({ kind: "relay", label: "Relay 串流", url: `${state.relayBase}/mjpeg/${encodeURIComponent(camera.id)}` });
+  const relayBases = getRelayBases();
+  relayBases.forEach((relayBase, index) => {
+    sources.push({
+      kind: "relay",
+      label: index === 0 ? "Relay 串流" : "預設 Relay 串流",
+      url: `${relayBase}/mjpeg/${encodeURIComponent(camera.id)}`,
+    });
+  });
   // The bundled Relay has no /v1/stream endpoint. Keep this only for a separately configured legacy proxy.
   if (state.proxyBase && state.proxyBase !== state.relayBase) {
     sources.push({ kind: "proxy", label: "Proxy 串流", url: `${state.proxyBase}/v1/stream?id=${encodeURIComponent(camera.id)}` });
   }
-  if (state.relayBase) sources.push({ kind: "snapshot", label: "官方快照備援", url: `${state.relayBase}/latest/${encodeURIComponent(camera.id)}` });
+  relayBases.forEach((relayBase, index) => {
+    sources.push({
+      kind: "snapshot",
+      label: index === 0 ? "官方快照備援" : "預設 Relay 快照備援",
+      url: `${relayBase}/latest/${encodeURIComponent(camera.id)}`,
+    });
+  });
   return sources.filter((source, index, list) => list.findIndex((candidate) => candidate.url === source.url) === index);
 }
 
@@ -710,7 +733,7 @@ function renderRouteSummary(camera, directionVerified) {
 }
 
 async function refreshLaneObservation(camera) {
-  if (!state.proxyBase || !camera?.id) return;
+  if (!getProxyBases().length || !camera?.id) return;
   const isCurrent = state.laneCameraId === camera.id;
   if (isCurrent && Date.now() - state.laneFetchedAt < LANE_REFRESH_MS) {
     updateLaneDataAge();
@@ -731,7 +754,7 @@ async function refreshLaneObservation(camera) {
     return;
   }
   try {
-    const response = await timeoutFetch(`${state.proxyBase}/v1/lanes/${encodeURIComponent(camera.id)}`, { cache: "no-store" }, 12000);
+    const response = await fetchFromServiceBases(getProxyBases(), `/v1/lanes/${encodeURIComponent(camera.id)}`, { cache: "no-store" }, 12000);
     const observation = await response.json().catch(() => ({ ok: false, error: "lane_response_invalid" }));
     if (token !== state.laneRequestToken || camera.id !== state.currentCamera?.id) return;
     state.laneFetchedAt = Date.now();
@@ -803,8 +826,9 @@ function hasVisibleCameraImage() {
   return Boolean(state.displayedCamera) && (!el.cctvImage.hidden || !el.cctvPreview.hidden);
 }
 
-function preloadCameraSnapshot(camera, token) {
-  if (!state.relayBase) return;
+function preloadCameraSnapshot(camera, token, sourceIndex = 0) {
+  const relayBase = getRelayBases()[sourceIndex];
+  if (!relayBase) return;
   const preview = el.cctvPreview;
   preview.onload = () => {
     if (token !== state.imageToken || !state.active || state.currentCamera?.id !== camera.id || !el.cctvImage.hidden) return;
@@ -819,9 +843,13 @@ function preloadCameraSnapshot(camera, token) {
     el.cameraStatus.textContent = "快照已顯示，串流連線中";
     updateImageAge();
   };
-  preview.onerror = () => {};
+  preview.onerror = () => {
+    if (token === state.imageToken && state.active && state.currentCamera?.id === camera.id) {
+      preloadCameraSnapshot(camera, token, sourceIndex + 1);
+    }
+  };
   preview.hidden = true;
-  preview.src = `${state.relayBase}/latest/${encodeURIComponent(camera.id)}?t=${Date.now()}`;
+  preview.src = `${relayBase}/latest/${encodeURIComponent(camera.id)}?t=${Date.now()}`;
 }
 
 function streamConnectTimeout(source) {
@@ -1040,9 +1068,9 @@ async function refreshRoadInformation(point) {
     if (changed || !state.imageLoadedAt) loadCameraStream(selected);
     if (directionVerified) void refreshLaneObservation(selected);
   } catch (error) {
-    setSource("CCTV 清單失敗", "error");
-    setRouteSummary("道路資料暫不可用", "目前無法讀取鏡頭目錄；保留既有道路資訊並在下一次定位時重試。", "讀取失敗", "error");
-    setObservation("道路資料暫不可用", error.name === "AbortError" ? "讀取逾時，將在下一次定位更新時重試。" : "無法讀取 CCTV 清單，請確認網路後重試。", "error");
+    setSource("道路判讀暫不可用", "error");
+    setRouteSummary("道路資料暫不可用", "目前無法完成前方鏡頭比對；保留既有道路資訊並在下一次定位時重試。", "判讀重試中", "error");
+    setObservation("道路判讀暫不可用", error.name === "AbortError" ? "道路比對逾時，將在下一次定位更新時重試。" : "前方鏡頭道路比對暫時失敗，系統會自動重試。", "error");
   }
 }
 
@@ -1169,7 +1197,11 @@ function stopDrive() {
 function retryRoadData() {
   if (!state.active || !state.lastPoint) return;
   setSource("重新讀取道路資料", "waiting");
-  void refreshRoadInformation(state.lastPoint);
+  // Do not make the driver wait for the remote full catalog. The compact starter
+  // catalog can resume same-corridor matching even while the Relay is recovering.
+  void getCctvList()
+    .catch(() => [])
+    .finally(() => void refreshRoadInformation(state.lastPoint));
 }
 
 function refreshSettingsServiceStatus() {
