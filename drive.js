@@ -682,8 +682,10 @@ function selectForwardCamera(point, course) {
 
   const current = candidates.find((camera) => camera.id === state.currentCamera?.id);
   if (current && current.distance >= CAMERA_SWITCH_METERS) return current;
-  const currentRoad = roadKey(state.currentCamera);
-  const sameRoadAhead = candidates.find((camera) => roadKey(camera) === currentRoad && camera.distance >= CAMERA_SWITCH_METERS);
+  const currentRoad = state.currentCamera ? roadKey(state.currentCamera) : "";
+  const sameRoadAhead = currentRoad
+    ? candidates.find((camera) => roadKey(camera) === currentRoad && camera.distance >= CAMERA_SWITCH_METERS)
+    : null;
   if (sameRoadAhead) return sameRoadAhead;
   return candidates.find((camera) => camera.distance >= CAMERA_SWITCH_METERS) || candidates[0] || null;
 }
@@ -1065,7 +1067,15 @@ async function refreshRoadInformation(point) {
     setObservation("前方道路影像", directionVerified
       ? `${selected.corridor ? "道路走廊與 GPS 航向已比對" : "GPS 實際行駛方向已比對"} ${selected.road} ${directionLabel(selected.direction, selected.id)} 主線；已選擇 ${formatDistance(selected.distance)} 前方鏡頭。`
       : "已取得 GPS 行駛方向，但鏡頭道路方向資料不足，僅作前方影像參考。", "reference");
-    if (changed || !state.imageLoadedAt) loadCameraStream(selected);
+    if (changed || !state.imageLoadedAt) {
+      try {
+        loadCameraStream(selected);
+      } catch (error) {
+        console.error("CCTV stream initialization failed", error);
+        setCameraPlaceholder("影像重新連線中", "道路與方向已確認，正在改用備援影像來源。", "waiting");
+        el.cameraStatus.textContent = "影像連線重試中";
+      }
+    }
     if (directionVerified) void refreshLaneObservation(selected);
   } catch (error) {
     setSource("道路判讀暫不可用", "error");
