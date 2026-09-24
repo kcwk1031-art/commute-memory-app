@@ -86,11 +86,18 @@ export function buildLaneGuidance(observation, now = Date.now()) {
   }
 
   if (!freshness.canRecommend) {
+    const delayedLanes = bestLane
+      ? lanes.map((lane) => ({ ...lane, isRecommended: lane.laneId === bestLane.laneId }))
+      : lanes;
     return {
       freshness,
-      lanes,
-      title: `主線 ${mainLaneCount} 線｜資料延遲 ${freshness.label}`,
-      detail: `${vdLabel}｜最後更新 ${freshness.label}。顯示最後速度，不提供車道推薦。`,
+      lanes: delayedLanes,
+      title: bestLane
+        ? `主線 ${mainLaneCount} 線｜第 ${bestLane.displayNumber} 車道最後紀錄最快`
+        : `主線 ${mainLaneCount} 線｜資料延遲 ${freshness.label}`,
+      detail: bestLane
+        ? `${vdLabel}｜最後更新 ${freshness.label}。${reference.detail || `第 ${bestLane.displayNumber} 車道為最後官方紀錄中速度最高。`} 資料延遲，請以現場路況為準。`
+        : `${vdLabel}｜最後更新 ${freshness.label}。顯示最後速度，尚無可辨識的最快車道。`,
       level: "warning",
     };
   }
