@@ -47,6 +47,21 @@ const relayStorageKey = "commute-cctv-relay-base-v1";
 const cameraCatalogStorageKey = "commute-cctv-catalog-v1";
 const destinationStorageKey = "commute-drive-destination-v1";
 const bundledCameraCatalogUrl = "./official-cctv-catalog.json";
+// Confirmed from the corridor calibration desk. The Relay uses this only to
+// choose a same-mainline-lane-count official VD; it never infers a lane count
+// from the CCTV image in the mobile client.
+const VERIFIED_MAINLINE_LANE_COUNTS = new Map([
+  ["CCTV-N3-S-27.900-M", 3],
+  ["CCTV-N3-S-32.940-M", 3],
+  ["CCTV-N3-S-35.900-M", 3],
+  ["CCTV-N3-S-40.980-M", 4],
+  ["CCTV-N3-S-46.470-M", 4],
+  ["CCTV-N3-S-49.730-M", 4],
+  ["CCTV-N3-S-54.400-M", 3],
+  ["CCTV-N3-S-60.500-M", 4],
+  ["CCTV-N3-S-65.450-M", 3],
+  ["CCTV-N3-S-70.300-M", 3],
+]);
 
 const el = {
   locationState: document.querySelector("#locationState"),
@@ -177,6 +192,12 @@ function getProxyBases() {
 function getRelayBases() {
   // A stale custom value must not block a driver from the configured production Relay.
   return [...new Set([state.relayBase, getDefaultRelayBase()].filter(Boolean))];
+}
+
+function laneObservationPath(cameraId) {
+  const laneCount = VERIFIED_MAINLINE_LANE_COUNTS.get(String(cameraId));
+  const query = Number.isInteger(laneCount) ? `?mainLaneCount=${laneCount}` : "";
+  return `/v1/lanes/${encodeURIComponent(cameraId)}${query}`;
 }
 
 function setSource(label, level = "waiting") {
@@ -411,7 +432,7 @@ function prefetchLaneObservation(camera) {
   if (!getProxyBases().length || !camera?.id) return;
   if (readPrefetchedLaneObservation(camera.id) || state.prefetchLaneRequests.has(camera.id)) return;
   state.prefetchLaneRequests.add(camera.id);
-  void fetchFromServiceBases(getProxyBases(), `/v1/lanes/${encodeURIComponent(camera.id)}`, { cache: "no-store" }, 12000)
+  void fetchFromServiceBases(getProxyBases(), laneObservationPath(camera.id), { cache: "no-store" }, 12000)
     .then(async (response) => {
       const observation = await response.json().catch(() => ({ ok: false, error: "lane_response_invalid" }));
       state.prefetchedLaneObservations.set(camera.id, {
@@ -775,7 +796,7 @@ async function refreshLaneObservation(camera, roadToken = state.roadRequestToken
     return;
   }
   try {
-    const response = await fetchFromServiceBases(getProxyBases(), `/v1/lanes/${encodeURIComponent(camera.id)}`, { cache: "no-store" }, 12000);
+    const response = await fetchFromServiceBases(getProxyBases(), laneObservationPath(camera.id), { cache: "no-store" }, 12000);
     const observation = await response.json().catch(() => ({ ok: false, error: "lane_response_invalid" }));
     if (roadToken !== state.roadRequestToken || token !== state.laneRequestToken || camera.id !== state.currentCamera?.id) return;
     state.laneFetchedAt = Date.now();
