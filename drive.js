@@ -53,6 +53,7 @@ const bundledCameraCatalogUrl = "./official-cctv-catalog.json";
 // Confirmed from the corridor calibration desk. The Relay uses this only to
 // choose a same-mainline-lane-count official VD; it never infers a lane count
 // from the CCTV image in the mobile client.
+const CALIBRATED_TEST_MODE = true;
 const VERIFIED_MAINLINE_LANE_COUNTS = new Map([
   ["CCTV-N3-S-27.900-M", 3],
   ["CCTV-N3-S-32.940-M", 3],
@@ -65,6 +66,7 @@ const VERIFIED_MAINLINE_LANE_COUNTS = new Map([
   ["CCTV-N3-S-65.450-M", 3],
   ["CCTV-N3-S-70.300-M", 3],
 ]);
+const CALIBRATED_TEST_CAMERA_IDS = new Set(VERIFIED_MAINLINE_LANE_COUNTS.keys());
 
 const el = {
   locationState: document.querySelector("#locationState"),
@@ -203,6 +205,10 @@ function laneObservationPath(cameraId) {
   const laneCount = VERIFIED_MAINLINE_LANE_COUNTS.get(String(cameraId));
   const query = Number.isInteger(laneCount) ? `?mainLaneCount=${laneCount}` : "";
   return `/v1/lanes/${encodeURIComponent(cameraId)}${query}`;
+}
+
+function isEligibleTestCamera(camera) {
+  return !CALIBRATED_TEST_MODE || CALIBRATED_TEST_CAMERA_IDS.has(String(camera?.id || ""));
 }
 
 function setSource(label, level = "waiting") {
@@ -415,6 +421,7 @@ function isRampCamera(camera) {
 function selectDestinationCandidateCamera(point, intent) {
   if (!intent || !state.cctvs.length) return null;
   return state.cctvs
+    .filter(isEligibleTestCamera)
     .filter((camera) => intent.routes.includes(cameraRouteKey(camera)))
     .filter((camera) => normalizeDirectionCode(camera.direction, camera.id) === intent.direction)
     .filter((camera) => !isRampCamera(camera))
@@ -673,6 +680,7 @@ function selectForwardCamera(point, course) {
   if (!Number.isFinite(heading)) return null;
   const corridor = matchRoadCorridor(getRouteSegments(), point, heading);
   const nearby = state.cctvs
+    .filter(isEligibleTestCamera)
     .map((camera) => {
       const distance = distanceBetween(point, camera);
       const bearing = bearingBetween(point, camera);
@@ -719,6 +727,7 @@ function selectForwardCamera(point, course) {
 
 function selectNearbyReferenceCamera(point) {
   const candidates = state.cctvs
+    .filter(isEligibleTestCamera)
     .map((camera) => ({ ...camera, distance: distanceBetween(point, camera) }))
     .filter((camera) => camera.distance <= MAX_CAMERA_DISTANCE_METERS * 2)
     .filter((camera) => !isRampCamera(camera))
@@ -735,6 +744,16 @@ function selectNearbyReferenceCamera(point) {
   };
 }
 
+function selectCalibratedTestCamera(point) {
+  if (!CALIBRATED_TEST_MODE) return null;
+  return state.cctvs
+    .filter(isEligibleTestCamera)
+    .filter((camera) => !isRampCamera(camera))
+    .map((camera) => ({ ...camera, distance: distanceBetween(point, camera) }))
+    .filter((camera) => camera.distance <= DESTINATION_CANDIDATE_MAX_DISTANCE_METERS)
+    .sort((left, right) => left.distance - right.distance)[0] || null;
+}
+
 function kilometersFromCamera(camera) {
   const match = String(camera?.mile || "").match(/^(\d+)K\+(\d{3})$/i);
   return match ? Number(match[1]) + Number(match[2]) / 1000 : NaN;
@@ -747,6 +766,7 @@ function findNextMainlineCamera(camera) {
   const forwardSign = ["S", "E"].includes(direction) ? 1 : -1;
   return state.cctvs
     .filter((candidate) => candidate.id !== camera.id)
+    .filter(isEligibleTestCamera)
     .filter((candidate) => !isRampCamera(candidate))
     .filter((candidate) => cameraRouteKey(candidate) === cameraRouteKey(camera))
     .filter((candidate) => normalizeDirectionCode(candidate.direction, candidate.id) === direction)
@@ -819,8 +839,6 @@ function switchToNextCameraFallback(camera) {
 
 function streamSources(camera) {
   const sources = [];
-  const officialUrl = String(camera.mediaUrl || "").trim();
-  if (/^https:\/\//i.test(officialUrl)) sources.push({ kind: "official", label: "官方原生串流", url: officialUrl });
   const relayBases = getRelayBases();
   relayBases.forEach((relayBase, index) => {
     sources.push({
@@ -829,6 +847,10 @@ function streamSources(camera) {
       url: `${relayBase}/mjpeg/${encodeURIComponent(camera.id)}`,
     });
   });
+  const officialUrl = String(camera.mediaUrl || "").trim();
+  // Phone clients always connect through the Relay first so that an upstream
+  // reconnect cannot blank the page. The official endpoint is compatibility fallback only.
+  if (/^https:\/\//i.test(officialUrl)) sources.push({ kind: "official", label: "官方原生串流備援", url: officialUrl });
   // The bundled Relay has no /v1/stream endpoint. Keep this only for a separately configured legacy proxy.
   if (state.proxyBase && state.proxyBase !== state.relayBase) {
     sources.push({ kind: "proxy", label: "Proxy 串流", url: `${state.proxyBase}/v1/stream?id=${encodeURIComponent(camera.id)}` });
@@ -994,7 +1016,6 @@ function handleStreamFailure(camera, token, hadVisibleImage, sourceIndex) {
   const sources = streamSources(camera);
   const fallbackIndex = sourceIndex + 1;
   if (state.active && state.currentCamera?.id === camera.id && sources[fallbackIndex]) {
-    // The official source is the lowest-latency option; the Relay is retained as an automatic compatibility fallback.
     state.streamTransport = sources[fallbackIndex].kind;
     el.cameraStatus.textContent = `改用${sources[fallbackIndex].label}`;
     loadCameraStream(camera, true, fallbackIndex);
@@ -1125,6 +1146,40 @@ async function refreshRoadInformation(point) {
   }
   if (!course || !Number.isFinite(course.heading)) {
     const candidate = prepareDestinationCandidate(point);
+    const testCamera = selectCalibratedTestCamera(point);
+    if (testCamera) {
+      const changed = testCamera.id !== state.currentCamera?.id;
+      state.laneRequestToken += 1;
+      state.laneCameraId = "";
+      state.laneObservation = null;
+      clearLaneCards();
+      state.currentCamera = testCamera;
+      if (!state.displayedCamera || state.displayedCamera.id === testCamera.id) renderCameraContext(testCamera);
+      setSource("十支測試鏡頭", "reference");
+      setRouteSummary(
+        `${testCamera.road} ${directionLabel(testCamera.direction, testCamera.id)} 主線`,
+        `${testCamera.mile || "里程待確認"}｜十支人工校正鏡頭測試模式，等待 GPS 航向確認。`,
+        "測試預載",
+        "reference",
+      );
+      setObservation(
+        "十支測試模式已預載",
+        "目前先使用已人工校正的鏡頭與官方 VD 車道速度；開始移動後會再以 GPS 航向確認同向前方鏡頭。",
+        "reference",
+      );
+      setLaneReference("正在讀取測試鏡頭官方 VD", "測試模式僅使用已完成畫面車道對位的十支鏡頭。", "waiting");
+      el.laneDataAge.textContent = "讀取中";
+      if (changed || !state.imageLoadedAt) {
+        try {
+          loadCameraStream(testCamera);
+        } catch (error) {
+          console.error("Calibrated test camera initialization failed", error);
+          setCameraPlaceholder("影像重新連線中", "正在透過 Relay 連接已校正測試鏡頭。", "waiting");
+        }
+      }
+      void refreshLaneObservation(testCamera, roadToken);
+      return;
+    }
     const nearbyReference = selectNearbyReferenceCamera(point);
     state.laneRequestToken += 1;
     state.laneCameraId = "";

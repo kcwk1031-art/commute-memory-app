@@ -1,6 +1,9 @@
 // Do not present a multi-minute-old detector average as an immediate driving cue.
 export const LANE_RECOMMEND_MAX_AGE_MS = 2 * 60 * 1000;
-export const LANE_DISPLAY_MAX_AGE_MS = 2 * 60 * 1000;
+// TDX can lag its published detector record by several minutes. Keep the
+// last official reading visible for diagnosis, but never present it as a live
+// lane-change reference once it passes the stricter recommendation threshold.
+export const LANE_DISPLAY_MAX_AGE_MS = 5 * 60 * 1000;
 
 function laneSpeedIsUsable(lane) {
   return Number.isFinite(Number(lane?.speedKph));
