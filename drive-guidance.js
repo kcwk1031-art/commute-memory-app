@@ -45,16 +45,20 @@ export function getLaneDataFreshness(dataCollectTime, now = Date.now()) {
 }
 
 export function buildLaneGuidance(observation, now = Date.now()) {
-  const lanes = Array.isArray(observation?.lanes)
-    ? observation.lanes
+  const hasConfirmedScreenMapping = observation?.screenLaneMapping?.state === "confirmed" && Array.isArray(observation?.screenLanes);
+  const laneSource = hasConfirmedScreenMapping ? observation.screenLanes : observation?.lanes;
+  const lanes = Array.isArray(laneSource)
+    ? laneSource
       .filter((lane) => [1, 2, 3].includes(Number(lane?.laneType)) && laneSpeedIsUsable(lane))
-      .sort((left, right) => laneIdValue(left) - laneIdValue(right))
-      .map((lane, index) => ({ ...lane, displayNumber: index + 1 }))
+      .sort((left, right) => hasConfirmedScreenMapping
+        ? Number(left.displayNumber) - Number(right.displayNumber)
+        : laneIdValue(left) - laneIdValue(right))
+      .map((lane, index) => ({ ...lane, displayNumber: Number(lane.displayNumber) || index + 1 }))
     : [];
   const freshness = getLaneDataFreshness(observation?.vd?.dataCollectTime, now);
   const mainLaneCount = lanes.length || Number(observation?.mainLaneCount) || 0;
   const vdLabel = vdDistanceLabel(observation?.vd?.distanceKm);
-  const reference = observation?.flowReference || {};
+  const reference = hasConfirmedScreenMapping ? observation?.screenFlowReference || {} : observation?.flowReference || {};
   const bestLaneIndex = lanes.findIndex((lane) => String(lane.laneId) === String(reference.bestLaneId));
   const bestLane = bestLaneIndex >= 0 ? lanes[bestLaneIndex] : null;
 
