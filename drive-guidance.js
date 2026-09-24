@@ -1,9 +1,9 @@
 // Do not present a multi-minute-old detector average as an immediate driving cue.
 export const LANE_RECOMMEND_MAX_AGE_MS = 2 * 60 * 1000;
 // TDX can lag its published detector record by several minutes. Keep the
-// last official reading visible for diagnosis, but never present it as a live
+// last official reading visible with its age, but never present it as a live
 // lane-change reference once it passes the stricter recommendation threshold.
-export const LANE_DISPLAY_MAX_AGE_MS = 5 * 60 * 1000;
+export const LANE_DISPLAY_MAX_AGE_MS = Number.POSITIVE_INFINITY;
 
 function laneSpeedIsUsable(lane) {
   return Number.isFinite(Number(lane?.speedKph));
@@ -41,10 +41,7 @@ export function getLaneDataFreshness(dataCollectTime, now = Date.now()) {
   if (ageMs <= LANE_RECOMMEND_MAX_AGE_MS) {
     return { state: "fresh", ageMs, label: formatAge(ageMs), canDisplay: true, canRecommend: true };
   }
-  if (ageMs <= LANE_DISPLAY_MAX_AGE_MS) {
-    return { state: "delayed", ageMs, label: formatAge(ageMs), canDisplay: true, canRecommend: false };
-  }
-  return { state: "expired", ageMs, label: formatAge(ageMs), canDisplay: false, canRecommend: false };
+  return { state: "delayed", ageMs, label: formatAge(ageMs), canDisplay: true, canRecommend: false };
 }
 
 export function buildLaneGuidance(observation, now = Date.now()) {
@@ -71,16 +68,6 @@ export function buildLaneGuidance(observation, now = Date.now()) {
       lanes,
       title: "主線車道資料不足",
       detail: "官方 VD 未回傳足夠的同向主線車道速度，因此不提供車道推薦。",
-      level: "warning",
-    };
-  }
-
-  if (!freshness.canDisplay) {
-    return {
-      freshness,
-      lanes,
-      title: "官方 VD 資料已過期",
-      detail: `最後一筆官方車道資料為 ${freshness.label}；已停止顯示速度與車道推薦。`,
       level: "warning",
     };
   }
