@@ -1,5 +1,6 @@
-export const LANE_RECOMMEND_MAX_AGE_MS = 6 * 60 * 1000;
-export const LANE_DISPLAY_MAX_AGE_MS = 15 * 60 * 1000;
+// Do not present a multi-minute-old detector average as an immediate driving cue.
+export const LANE_RECOMMEND_MAX_AGE_MS = 2 * 60 * 1000;
+export const LANE_DISPLAY_MAX_AGE_MS = 2 * 60 * 1000;
 
 function laneSpeedIsUsable(lane) {
   return Number.isFinite(Number(lane?.speedKph));
