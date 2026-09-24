@@ -746,12 +746,57 @@ function selectNearbyReferenceCamera(point) {
 
 function selectCalibratedTestCamera(point) {
   if (!CALIBRATED_TEST_MODE) return null;
-  return state.cctvs
+  const testCameras = state.cctvs
     .filter(isEligibleTestCamera)
     .filter((camera) => !isRampCamera(camera))
     .map((camera) => ({ ...camera, distance: distanceBetween(point, camera) }))
-    .filter((camera) => camera.distance <= DESTINATION_CANDIDATE_MAX_DISTANCE_METERS)
-    .sort((left, right) => left.distance - right.distance)[0] || null;
+    .filter((camera) => camera.distance <= DESTINATION_CANDIDATE_MAX_DISTANCE_METERS);
+  const current = testCameras.find((camera) => camera.id === state.currentCamera?.id);
+  if (current && current.distance > CAMERA_SWITCH_METERS) return current;
+
+  // In the pilot, all calibrated cameras are N3 southbound. Advance at the
+  // same 500 m threshold used by normal forward-camera selection, even if a
+  // phone has not yet supplied a reliable heading.
+  const next = current ? findNextMainlineCamera(current) : null;
+  if (next) return { ...next, distance: distanceBetween(point, next) };
+  return testCameras.sort((left, right) => left.distance - right.distance)[0] || null;
+}
+
+function activateCalibratedTestCamera(camera, roadToken) {
+  const changed = camera.id !== state.currentCamera?.id;
+  if (changed) {
+    state.laneRequestToken += 1;
+    state.laneCameraId = "";
+    state.laneObservation = null;
+    clearLaneCards();
+  }
+  state.currentCamera = camera;
+  if (!state.displayedCamera || state.displayedCamera.id === camera.id) renderCameraContext(camera);
+  setSource("十支測試鏡頭", "reference");
+  setRouteSummary(
+    `${camera.road} ${directionLabel(camera.direction, camera.id)} 主線`,
+    `${camera.mile || "里程待確認"}｜十支人工校正鏡頭測試模式，距鏡頭 500 m 時切換下一支。`,
+    "測試預載",
+    "reference",
+  );
+  setObservation(
+    "十支測試模式運作中",
+    "只使用已人工校正的十支鏡頭；開始或暫停移動時仍會讀取對應官方 VD 車道速度。",
+    "reference",
+  );
+  if (changed || !state.laneObservation) {
+    setLaneReference("正在讀取測試鏡頭官方 VD", "測試模式僅使用已完成畫面車道對位的十支鏡頭。", "waiting");
+    el.laneDataAge.textContent = "讀取中";
+  }
+  if (changed || !state.imageLoadedAt) {
+    try {
+      loadCameraStream(camera);
+    } catch (error) {
+      console.error("Calibrated test camera initialization failed", error);
+      setCameraPlaceholder("影像重新連線中", "正在透過 Relay 連接已校正測試鏡頭。", "waiting");
+    }
+  }
+  void refreshLaneObservation(camera, roadToken);
 }
 
 function kilometersFromCamera(camera) {
@@ -1144,42 +1189,15 @@ async function refreshRoadInformation(point) {
     el.laneDataAge.textContent = "更新中";
     setLaneReference("正在確認同向偵測器", "定位已更新；正在比對前方鏡頭與官方 VD。", "waiting");
   }
-  if (!course || !Number.isFinite(course.heading)) {
-    const candidate = prepareDestinationCandidate(point);
+  if (CALIBRATED_TEST_MODE) {
     const testCamera = selectCalibratedTestCamera(point);
     if (testCamera) {
-      const changed = testCamera.id !== state.currentCamera?.id;
-      state.laneRequestToken += 1;
-      state.laneCameraId = "";
-      state.laneObservation = null;
-      clearLaneCards();
-      state.currentCamera = testCamera;
-      if (!state.displayedCamera || state.displayedCamera.id === testCamera.id) renderCameraContext(testCamera);
-      setSource("十支測試鏡頭", "reference");
-      setRouteSummary(
-        `${testCamera.road} ${directionLabel(testCamera.direction, testCamera.id)} 主線`,
-        `${testCamera.mile || "里程待確認"}｜十支人工校正鏡頭測試模式，等待 GPS 航向確認。`,
-        "測試預載",
-        "reference",
-      );
-      setObservation(
-        "十支測試模式已預載",
-        "目前先使用已人工校正的鏡頭與官方 VD 車道速度；開始移動後會再以 GPS 航向確認同向前方鏡頭。",
-        "reference",
-      );
-      setLaneReference("正在讀取測試鏡頭官方 VD", "測試模式僅使用已完成畫面車道對位的十支鏡頭。", "waiting");
-      el.laneDataAge.textContent = "讀取中";
-      if (changed || !state.imageLoadedAt) {
-        try {
-          loadCameraStream(testCamera);
-        } catch (error) {
-          console.error("Calibrated test camera initialization failed", error);
-          setCameraPlaceholder("影像重新連線中", "正在透過 Relay 連接已校正測試鏡頭。", "waiting");
-        }
-      }
-      void refreshLaneObservation(testCamera, roadToken);
+      activateCalibratedTestCamera(testCamera, roadToken);
       return;
     }
+  }
+  if (!course || !Number.isFinite(course.heading)) {
+    const candidate = prepareDestinationCandidate(point);
     const nearbyReference = selectNearbyReferenceCamera(point);
     state.laneRequestToken += 1;
     state.laneCameraId = "";
