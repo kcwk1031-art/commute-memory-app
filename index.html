@@ -17,7 +17,7 @@
         <p>智慧路況</p>
         <div class="brand-title-row">
           <strong>智慧路況助理</strong>
-          <span class="app-version" aria-label="應用程式版本">v32</span>
+          <span class="app-version" aria-label="應用程式版本">v33</span>
         </div>
       </div>
       <button class="quiet-button" id="openSettings" type="button">設定</button>
@@ -165,7 +165,18 @@
           </label>
         </div>
       </details>
-      <p class="dialog-note">此頁僅在服務異常或測試環境時使用。影像由官方公開來源提供；路段、車道與速限未確認時不會顯示為駕駛建議。<a href="privacy.html">隱私權說明</a></p>
+      <section class="test-log-settings" aria-label="封閉測試紀錄">
+        <label class="test-log-toggle">
+          <input id="testLoggingEnabled" type="checkbox">
+          <span>啟用封閉測試紀錄</span>
+        </label>
+        <small id="testLogStatus">未啟用｜不會保存 GPS 或測試診斷資料。</small>
+        <div class="test-log-actions">
+          <button class="secondary-action" id="exportTestLog" type="button">匯出測試紀錄</button>
+          <button class="secondary-action" id="clearTestLog" type="button">清除本機紀錄</button>
+        </div>
+      </section>
+      <p class="dialog-note">啟用後，精確 GPS、定位精度、航向、車速、鏡頭切換與資料新鮮度僅保存於此瀏覽器，供測試優化後匯出；不會自動上傳。影像由官方公開來源提供；路段、車道與速限未確認時不會顯示為駕駛建議。<a href="privacy.html">隱私權說明</a></p>
       <div class="dialog-actions dialog-actions-three">
         <button class="secondary-action" id="resetSettings" type="button">使用預設</button>
         <button class="secondary-action" id="cancelSettings" value="cancel" type="button">取消</button>

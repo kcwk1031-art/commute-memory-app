@@ -14,6 +14,7 @@ import {
 import { resolveDestinationIntent } from "./drive-destination.js";
 import { buildLaneGuidance } from "./drive-guidance.js";
 import { STARTER_CCTV } from "./drive-starter-catalog.js";
+import { appendTestEvent, clearTestEvents, readTestEvents, setTestLoggingEnabled, testLoggingEnabled } from "./drive-test-log.js";
 
 const TDX_CCTV_URL = "https://tdx.transportdata.tw/api/basic/v2/Road/Traffic/CCTV/Freeway?$format=JSON";
 const CAMERA_CATALOG_REFRESH_MS = 15 * 60 * 1000;
@@ -44,6 +45,7 @@ const MIN_NATIVE_HEADING_SPEED_KPH = 7;
 const MIN_SPEED_INTERVAL_SECONDS = 2;
 const MAX_SPEED_INTERVAL_SECONDS = 20;
 const MAX_ESTIMATED_SPEED_KPH = 160;
+const TEST_LOG_POSITION_INTERVAL_MS = 5000;
 const LOCATION_OPTIONS = { enableHighAccuracy: true, maximumAge: 1000, timeout: 12000 };
 const proxyStorageKey = "commute-cctv-proxy-base-v1";
 const relayStorageKey = "commute-cctv-relay-base-v1";
@@ -120,6 +122,10 @@ const el = {
   settingsDialog: document.querySelector("#settingsDialog"),
   proxyEndpoint: document.querySelector("#proxyEndpoint"),
   relayEndpoint: document.querySelector("#relayEndpoint"),
+  testLoggingEnabled: document.querySelector("#testLoggingEnabled"),
+  testLogStatus: document.querySelector("#testLogStatus"),
+  exportTestLog: document.querySelector("#exportTestLog"),
+  clearTestLog: document.querySelector("#clearTestLog"),
   settingsServiceStatus: document.querySelector("#settingsServiceStatus"),
   saveSettings: document.querySelector("#saveSettings"),
   resetSettings: document.querySelector("#resetSettings"),
@@ -157,6 +163,9 @@ const state = {
   laneRequestToken: 0,
   roadRequestToken: 0,
   prefetchedLaneObservations: new Map(),
+  testLoggingEnabled: testLoggingEnabled(localStorage),
+  testLogSessionId: "",
+  lastTestLogAt: 0,
   prefetchLaneRequests: new Set(),
   destination: normalizeDestination(localStorage.getItem(destinationStorageKey)),
   proxyBase: normalizeProxyBase(localStorage.getItem(proxyStorageKey)) || getDefaultProxyBase(),
@@ -209,6 +218,86 @@ function laneObservationPath(cameraId) {
 
 function isEligibleTestCamera(camera) {
   return !CALIBRATED_TEST_MODE || CALIBRATED_TEST_CAMERA_IDS.has(String(camera?.id || ""));
+}
+
+function createTestLogSessionId() {
+  if (typeof globalThis.crypto?.randomUUID === "function") return globalThis.crypto.randomUUID();
+  return `test-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function currentLaneReference() {
+  const observation = state.laneObservation;
+  const reference = observation?.screenFlowReference || observation?.flowReference || {};
+  return {
+    vdDataCollectTime: observation?.vd?.dataCollectTime || null,
+    fastestDisplayNumber: Number.isInteger(Number(reference.bestDisplayNumber)) ? Number(reference.bestDisplayNumber) : null,
+    referenceState: reference.state || "unavailable",
+  };
+}
+
+function refreshTestLogStatus() {
+  if (!el.testLogStatus) return;
+  const count = readTestEvents(localStorage).length;
+  el.testLogStatus.textContent = state.testLoggingEnabled
+    ? `已啟用｜本機已記錄 ${count} 筆，不會自動上傳。`
+    : "未啟用｜不會保存 GPS 或測試診斷資料。";
+}
+
+function recordTestEvent(type, point = state.lastPoint, speedKph = null, force = false) {
+  if (!state.testLoggingEnabled || !state.active) return;
+  const now = Date.now();
+  if (!force && now - state.lastTestLogAt < TEST_LOG_POSITION_INTERVAL_MS) return;
+  const event = {
+    schemaVersion: 1,
+    type,
+    timestamp: now,
+    sessionId: state.testLogSessionId,
+    position: point && Number.isFinite(point.lat) && Number.isFinite(point.lng) ? {
+      latitude: Number(point.lat.toFixed(6)),
+      longitude: Number(point.lng.toFixed(6)),
+      accuracyMeters: Number.isFinite(point.accuracy) ? Math.round(point.accuracy) : null,
+      headingDegrees: Number.isFinite(point.heading) ? Math.round(point.heading) : null,
+      speedKph: Number.isFinite(speedKph) ? Math.round(speedKph) : null,
+    } : null,
+    selection: {
+      cameraId: state.currentCamera?.id || null,
+      cameraDistanceMeters: Number.isFinite(state.currentCamera?.distance) ? Math.round(state.currentCamera.distance) : null,
+      streamTransport: state.streamTransport || null,
+      calibratedTestMode: CALIBRATED_TEST_MODE,
+    },
+    laneReference: currentLaneReference(),
+  };
+  const result = appendTestEvent(localStorage, event);
+  if (result.stored) state.lastTestLogAt = now;
+  refreshTestLogStatus();
+}
+
+function updateTestLogging(enabled) {
+  state.testLoggingEnabled = Boolean(enabled) && setTestLoggingEnabled(localStorage, true);
+  if (!enabled) {
+    setTestLoggingEnabled(localStorage, false);
+    state.testLogSessionId = "";
+  } else if (state.active && !state.testLogSessionId) {
+    state.testLogSessionId = createTestLogSessionId();
+    recordTestEvent("session_started", state.lastPoint, null, true);
+  }
+  refreshTestLogStatus();
+}
+
+function exportTestLog() {
+  const events = readTestEvents(localStorage);
+  const payload = {
+    schemaVersion: 1,
+    exportedAt: new Date().toISOString(),
+    purpose: "commute_route_test_optimization",
+    events,
+  };
+  const href = URL.createObjectURL(new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" }));
+  const link = document.createElement("a");
+  link.href = href;
+  link.download = `smart-traffic-test-log-${new Date().toISOString().slice(0, 10)}.json`;
+  link.click();
+  window.setTimeout(() => URL.revokeObjectURL(href), 1000);
 }
 
 function setSource(label, level = "waiting") {
@@ -772,6 +861,7 @@ function activateCalibratedTestCamera(camera, roadToken) {
   }
   state.currentCamera = camera;
   if (!state.displayedCamera || state.displayedCamera.id === camera.id) renderCameraContext(camera);
+  if (changed) recordTestEvent("camera_selected", state.lastPoint, null, true);
   setSource("十支測試鏡頭", "reference");
   setRouteSummary(
     `${camera.road} ${directionLabel(camera.direction, camera.id)} 主線`,
@@ -1338,6 +1428,7 @@ function handlePosition(position) {
   el.locationAccuracy.textContent = String(Math.round(point.accuracy));
   el.gpsSpeed.textContent = Number.isFinite(speed.value) ? String(speed.value) : "--";
   el.gpsSpeedNote.textContent = Number.isFinite(speed.value) ? `${speed.source} km/h` : speed.source;
+  recordTestEvent("position", point, speed.value);
   if (point.accuracy > MAX_LOCATION_ACCURACY_METERS) {
     el.travelDirection.textContent = "--";
     el.travelDirectionNote.textContent = `需在 ${MAX_LOCATION_ACCURACY_METERS} m 內`;
@@ -1383,6 +1474,11 @@ function startDrive() {
   state.cameraFallbackHops = 0;
   resetCourse();
   state.active = true;
+  if (state.testLoggingEnabled) {
+    state.testLogSessionId = createTestLogSessionId();
+    state.lastTestLogAt = 0;
+    recordTestEvent("session_started", null, null, true);
+  }
   // Start from the bundled catalog before the first GPS callback so destination candidates can be prepared immediately.
   void getCctvList().catch(() => {});
   el.startDrive.hidden = true;
@@ -1401,6 +1497,7 @@ function startDrive() {
 }
 
 function stopDrive() {
+  recordTestEvent("session_stopped", state.lastPoint, null, true);
   if (state.watchId !== null) navigator.geolocation.clearWatch(state.watchId);
   if (state.refreshTimer !== null) window.clearInterval(state.refreshTimer);
   if (state.reconnectTimer !== null) window.clearTimeout(state.reconnectTimer);
@@ -1509,6 +1606,7 @@ function saveProxySetting() {
   else localStorage.removeItem(proxyStorageKey);
   if (customRelayBase && customRelayBase !== defaultRelayBase) localStorage.setItem(relayStorageKey, customRelayBase);
   else localStorage.removeItem(relayStorageKey);
+  updateTestLogging(Boolean(el.testLoggingEnabled?.checked));
   state.cctvs = [];
   state.cctvsLoadedAt = 0;
   state.currentCamera = null;
@@ -1535,12 +1633,21 @@ document.addEventListener("visibilitychange", () => {
 el.openSettings.addEventListener("click", () => {
   el.proxyEndpoint.value = state.proxyBase;
   el.relayEndpoint.value = state.relayBase;
+  el.testLoggingEnabled.checked = state.testLoggingEnabled;
+  refreshTestLogStatus();
   refreshSettingsServiceStatus();
   showAppDialog(el.settingsDialog);
 });
 el.saveSettings.addEventListener("click", saveProxySetting);
 el.resetSettings.addEventListener("click", resetServiceSettings);
 el.cancelSettings.addEventListener("click", () => closeAppDialog(el.settingsDialog));
+el.exportTestLog.addEventListener("click", exportTestLog);
+el.clearTestLog.addEventListener("click", () => {
+  if (window.confirm("確定清除這支裝置的所有測試紀錄嗎？此操作無法復原。")) {
+    clearTestEvents(localStorage);
+    refreshTestLogStatus();
+  }
+});
 el.editDestination.addEventListener("click", openDestinationDialog);
 el.destinationForm.addEventListener("submit", (event) => {
   event.preventDefault();
@@ -1564,6 +1671,7 @@ if (!state.proxyBase) {
 }
 
 renderTripPlan();
+refreshTestLogStatus();
 
 // Camera positions rarely change. Keeping the last verified catalog lets a returning driver
 // select the direct official image even while a sleeping relay is warming up.

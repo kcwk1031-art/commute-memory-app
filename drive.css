@@ -549,6 +549,30 @@ body[data-dialog-open]::before {
 .advanced-settings { border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
 .advanced-settings summary { padding: 12px 0; color: var(--teal-dark); cursor: pointer; font-size: 14px; font-weight: 800; }
 .advanced-settings-fields { display: grid; gap: 12px; padding: 0 0 14px; }
+.test-log-settings {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid #b8d6cd;
+  border-radius: 8px;
+  background: #f3faf6;
+}
+.settings-form .test-log-toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 15px;
+}
+.settings-form .test-log-toggle input {
+  width: 20px;
+  min-height: 20px;
+  height: 20px;
+  margin: 0;
+  accent-color: var(--teal);
+}
+.test-log-settings small { color: var(--muted); font-size: 12px; font-weight: 650; line-height: 1.4; }
+.test-log-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.test-log-actions .secondary-action { min-height: 42px; padding: 7px; font-size: 13px; }
 .dialog-note { margin: 0; color: var(--muted); font-size: 14px; line-height: 1.45; }
 .dialog-note a { color: var(--teal); font-weight: 800; }
 .dialog-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
