@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>走廊營運報表</title>
+  <style>
+    :root { --bg:#f3f5f1; --surface:#fff; --ink:#12231f; --muted:#66746e; --line:#d8e0db; --teal:#0c5f55; --green:#0a8150; --amber:#936007; --amber-soft:#fff3dc; --red:#a23b30; --red-soft:#fde8e5; }
+    * { box-sizing:border-box; } body { margin:0; background:var(--bg); color:var(--ink); font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; } main { width:min(1200px,100%); margin:0 auto; padding:26px 16px 48px; display:grid; gap:16px; }
+    header { display:flex; justify-content:space-between; gap:16px; align-items:start; } h1,h2,p { margin:0; } h1 { font-size:25px; } h2 { font-size:18px; } .eyebrow,.muted { color:var(--muted); font-size:13px; font-weight:750; } .updated { color:var(--muted); font-size:13px; font-weight:700; text-align:right; } a { color:var(--teal); font-weight:800; }
+    .metrics { display:grid; grid-template-columns:repeat(6,minmax(0,1fr)); gap:10px; } .metric { min-height:96px; padding:13px; border:1px solid var(--line); border-radius:7px; background:var(--surface); display:grid; gap:4px; align-content:center; } .metric span { color:var(--muted); font-size:12px; font-weight:750; } .metric strong { font-size:22px; } .metric small { color:var(--muted); font-size:11px; font-weight:700; }
+    section { border:1px solid var(--line); border-radius:7px; background:var(--surface); padding:16px; } .section-head { display:flex; justify-content:space-between; gap:12px; align-items:baseline; margin-bottom:12px; } .issue-list { display:grid; gap:8px; } .issue { padding:11px; border-left:4px solid var(--amber); background:var(--amber-soft); display:grid; gap:3px; } .issue[data-severity="high"] { border-color:var(--red); background:var(--red-soft); } .issue strong { font-size:14px; } .issue p { color:#604d2a; font-size:13px; font-weight:650; line-height:1.45; } .issue[data-severity="high"] p { color:#783e36; } .all-clear { color:var(--green); font-weight:800; padding:6px 0; }
+    .table-wrap { overflow:auto; } table { width:100%; min-width:980px; border-collapse:collapse; } th,td { padding:11px 9px; border-bottom:1px solid var(--line); text-align:left; vertical-align:top; font-size:13px; } th { color:var(--muted); font-size:12px; white-space:nowrap; } td strong { display:block; } .state { font-weight:850; } .state.ready { color:var(--green); } .state.waiting,.state.stale { color:var(--amber); } .state.error { color:var(--red); } .lanes { display:flex; gap:5px; } .lane { min-width:48px; padding:5px; border:1px solid var(--line); border-radius:5px; text-align:center; } .lane.recommended { border:2px solid var(--green); background:#eef9f2; } .lane span { display:block; color:var(--muted); font-size:10px; font-weight:750; } .lane strong { font-size:15px; } .action { color:var(--muted); font-size:12px; line-height:1.45; } .empty { color:var(--muted); font-weight:700; }
+    @media (max-width:800px) { main { padding:18px 12px 36px; } header { display:grid; } .updated { text-align:left; } .metrics { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+  </style>
+</head>
+<body>
+  <main>
+    <header><div><p class="eyebrow">Corridor Observer／營運報表 v1</p><h1 id="title">國三南向｜新店至楊梅</h1></div><div class="updated" id="updated">讀取中</div></header>
+    <section class="metrics" aria-label="營運摘要"><div class="metric"><span>鏡頭可用</span><strong id="cameraHealth">--</strong><small>新畫面在時效內</small></div><div class="metric"><span>串流 FPS</span><strong id="fps">--</strong><small>官方來源實測範圍</small></div><div class="metric"><span>已驗證車道</span><strong id="verified">--</strong><small>可輸出官方車道速度</small></div><div class="metric"><span>官方資料延遲</span><strong id="delayed">--</strong><small>保留最後資料與時間標示</small></div><div class="metric"><span>待對位鏡頭</span><strong id="mapping">--</strong><small>不顯示可能錯誤速度</small></div><div class="metric"><span>待處理項目</span><strong id="issues">--</strong><small>優先看下方原因</small></div></section>
+    <section><div class="section-head"><div><p class="eyebrow">待處理清單</p><h2>需要介入的資料問題</h2></div><a href="/pilot">回校正台</a></div><div class="issue-list" id="issueList"></div></section>
+    <section><div class="section-head"><div><p class="eyebrow">十支鏡頭營運狀態</p><h2>串流、官方速度與影像車流觀測</h2></div><span class="muted">每 10 秒更新</span></div><div class="table-wrap"><table><thead><tr><th>序列／里程</th><th>串流健康</th><th>官方資料</th><th>畫面左至右主線速度</th><th>影像車流觀測</th><th>車道建議</th><th>後續作法</th></tr></thead><tbody id="cameraRows"></tbody></table></div></section>
+  </main>
+  <script>
+    const endpoint='/v1/corridors/n3-south-xindian-yangmei/output';
+    const $=id=>document.getElementById(id);
+    const fmtAge=ms=>ms===null||ms===undefined?'--':ms<60000?`${Math.round(ms/1000)} 秒`:`${Math.floor(ms/60000)} 分鐘`;
+    const time=value=>{const date=new Date(String(value||''));return Number.isFinite(date.getTime())?date.toLocaleTimeString('zh-TW',{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false}):'待確認'};
+    const roadLabel=road=>({ready:'已對位',stale:'資料延遲',mapping_required:'待對位',mapping_review_required:'待確認',lane_count_mismatch:'車道不一致',unavailable:'暫不可用'}[road?.state]||'等待中');
+    const streamLabel=cctv=>cctv?.state==='ready'?'正常':cctv?.state==='stale'?'畫面延遲':'等待畫面';
+    const rowAction=camera=>{if(camera.cctv.state!=='ready')return '確認 Relay／官方鏡頭來源。'; if(camera.road.state==='stale')return '保留最後已對位資料並標示年齡，等待新官方 VD。'; if(camera.road.state!=='ready')return '回校正台完成車道對位。'; return '持續監測。'};
+    const trendLabel=trend=>({increasing:'增加',decreasing:'減少',stable:'穩定',insufficient:'蒐集中'}[trend]||'待確認');
+    function render(data) {
+      const s=data.summary||{}; $('title').textContent=data.label||$('title').textContent; $('updated').textContent=`後台更新：${time(data.updatedAt)}\n資料來源：官方 CCTV／VD`;
+      $('cameraHealth').textContent=`${s.readyCameras??0} / ${s.cameraCount??0}`; $('fps').textContent=s.liveFpsRange?`${s.liveFpsRange.min}–${s.liveFpsRange.max}`:'--'; $('verified').textContent=`${s.verifiedMappingCameras??0} / ${s.cameraCount??0}`; $('delayed').textContent=s.delayedOfficialDataCameras??0; $('mapping').textContent=(s.mappingRequiredCameras||0)+(s.laneCountMismatchCameras||0); $('issues').textContent=s.reportIssueCount??0;
+      const issues=data.reportIssues||[]; $('issueList').replaceChildren(...(issues.length?issues.map(issue=>{const el=document.createElement('article');el.className='issue';el.dataset.severity=issue.severity;el.innerHTML=`<strong>${issue.mile}｜${issue.label}：${issue.detail}</strong><p>處理方式：${issue.action}</p>`;return el;}):[Object.assign(document.createElement('p'),{className:'all-clear',textContent:'目前無待處理項目。'})]));
+      $('cameraRows').replaceChildren(...(data.cameras||[]).map(camera=>{const road=camera.road||{};const lanes=road.lanes?.length?road.lanes:(road.lastKnownLanes||[]);const tr=document.createElement('tr');const laneHtml=lanes.length?`<div class="lanes">${lanes.map(lane=>`<div class="lane${road.recommendation?.laneIndex===lane.laneIndex?' recommended':''}"><span>第 ${lane.laneIndex}</span><strong>${lane.speedKph??'--'}</strong><span>km/h</span></div>`).join('')}</div>`:'<span class="empty">--</span>';const visual=camera.visualFlow;const visualHtml=visual?.lanes?.length?`${visual.lanes.map(lane=>`第 ${lane.laneIndex}：${lane.latestVehicleCount??'--'} 輛（${trendLabel(lane.trend)}）`).join('<br>')}<br><span class="action">僅影像趨勢，不是速度</span>`:'<span class="empty">蒐集影像樣本中</span>';tr.innerHTML=`<td><strong>${camera.sequence}. ${camera.mile}</strong>${camera.label}</td><td><span class="state ${camera.cctv.state==='ready'?'ready':camera.cctv.state==='stale'?'stale':'error'}">${streamLabel(camera.cctv)}</span><br>${fmtAge(camera.cctv.ageMs)}｜${camera.cctv.sourceFps||'--'} FPS</td><td><span class="state ${road.state==='ready'?'ready':road.state==='stale'?'stale':'error'}">${roadLabel(road)}</span><br>${road.sourceDataTime?`VD ${time(road.sourceDataTime)}｜${fmtAge(road.sourceDataAgeMs)}`:'VD 時間待確認'}</td><td>${laneHtml}</td><td>${visualHtml}</td><td>${road.recommendation?.detail||'不提供車道推薦'}</td><td class="action">${rowAction(camera)}</td>`;return tr;}));
+    }
+    async function refresh(){try{const response=await fetch(endpoint,{cache:'no-store'});if(!response.ok)throw new Error('output_failed');render(await response.json());}catch{ $('updated').textContent='無法連線本機 Observer；保留上一筆報表。'; }}
+    refresh(); window.setInterval(refresh,10000);
+  </script>
+</body>
+</html>

@@ -1,0 +1,6 @@
+node_modules/
+__pycache__/
+*.pyc
+data/*
+!data/calibrations/
+!data/calibrations/n3-south-xindian-yangmei-lane-calibration.json

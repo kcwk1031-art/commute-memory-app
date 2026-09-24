@@ -1,0 +1,300 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>國三走廊測試台</title>
+  <style>
+    :root { --bg:#f3f5f1; --surface:#fff; --ink:#12231f; --muted:#66746e; --line:#d8e0db; --teal:#0c5f55; --teal-soft:#e4f2ec; --amber:#9a6206; --amber-soft:#fff1d7; --red:#a23b30; --red-soft:#fde8e5; }
+    * { box-sizing:border-box; } body { margin:0; background:var(--bg); color:var(--ink); font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+    main { width:min(1120px,100%); margin:0 auto; padding:24px 16px 48px; display:grid; gap:16px; }
+    header { display:flex; align-items:start; justify-content:space-between; gap:12px; } h1,p { margin:0; } h1 { font-size:24px; } .eyebrow,.muted { color:var(--muted); font-size:13px; font-weight:700; }
+    .controls { display:flex; flex-wrap:wrap; gap:8px; align-items:center; } button { min-height:38px; padding:7px 11px; border:1px solid var(--line); border-radius:6px; background:var(--surface); color:var(--ink); font:inherit; font-weight:800; cursor:pointer; } button[data-active="true"] { background:var(--teal); color:#fff; border-color:var(--teal); } .preview-selector { display:flex; align-items:center; gap:6px; color:var(--muted); font-size:12px; font-weight:800; } .preview-selector select { min-height:38px; max-width:220px; border:1px solid var(--line); border-radius:6px; padding:6px; background:var(--surface); color:var(--ink); font:inherit; font-weight:800; }
+    .summary { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px; } .metric { background:var(--surface); border:1px solid var(--line); border-radius:7px; padding:12px; display:grid; gap:4px; } .metric span { color:var(--muted); font-size:12px; font-weight:700; } .metric strong { font-size:19px; }
+    .sequence { display:grid; grid-template-columns:repeat(10,minmax(0,1fr)); gap:5px; } .slot { min-height:54px; border:1px solid var(--line); border-radius:6px; padding:5px; background:var(--surface); color:var(--muted); font-size:11px; font-weight:800; text-align:left; } .slot.current { border-color:var(--teal); background:var(--teal-soft); color:var(--ink); } .slot.next { outline:2px solid #91cdb9; outline-offset:1px; color:var(--ink); } .slot.failed { background:var(--red-soft); color:var(--red); }
+    .notice { padding:12px; border-left:4px solid var(--amber); background:var(--amber-soft); font-weight:700; } .grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+    .decision { display:grid; gap:12px; padding:16px; border:1px solid var(--line); border-left:5px solid var(--teal); border-radius:7px; background:var(--surface); } .decision-head { display:flex; align-items:start; justify-content:space-between; gap:12px; } .decision h2 { margin:0; font-size:20px; } .decision-status { color:var(--teal); font-weight:900; font-size:13px; white-space:nowrap; } .lane-speeds { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:8px; } .lane-speed { min-height:88px; padding:10px; border:1px solid var(--line); border-radius:6px; display:grid; gap:3px; align-content:center; } .lane-speed.recommended { border:2px solid #13a663; background:#eef9f2; } .lane-speed span { color:var(--muted); font-size:12px; font-weight:800; } .lane-speed strong { font-size:24px; } .decision-copy { color:var(--muted); font-size:13px; line-height:1.5; font-weight:700; } .route-pending { padding:10px 12px; border-left:3px solid var(--amber); background:var(--amber-soft); color:#68440c; font-size:13px; font-weight:800; }
+    .camera { overflow:hidden; border:1px solid var(--line); border-radius:7px; background:var(--surface); } .camera-head { padding:10px 11px; display:flex; justify-content:space-between; gap:8px; align-items:center; } .camera-head strong { font-size:14px; } .camera-head span { color:var(--muted); font-size:12px; font-weight:700; white-space:nowrap; } .camera img { display:block; width:100%; aspect-ratio:16/8.5; object-fit:contain; background:#0c1915; } .camera-foot { padding:9px 11px; border-top:1px solid var(--line); color:var(--muted); font-size:12px; font-weight:700; } .monitor-status { display:flex; justify-content:space-between; gap:8px; margin-top:8px; color:var(--ink); font-size:12px; font-weight:900; } .monitor-status[data-state="stale"] { color:var(--red); } .monitor-status[data-state="ready"] { color:var(--teal); } .mini-lanes { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:5px; margin-top:8px; } .mini-lane { padding:7px 5px; border:1px solid var(--line); border-radius:5px; text-align:center; display:grid; gap:2px; } .mini-lane span { color:var(--muted); font-size:10px; font-weight:800; } .mini-lane strong { font-size:16px; } .mini-lane.recommended { border:2px solid #13a663; background:#eef9f2; } .mini-lanes.stale .mini-lane { background:#f4f2ef; color:#6b6259; } .mini-lanes.stale .mini-lane strong { color:#6b6259; } .monitor-detail { margin:8px 0 0; color:var(--muted); font-size:11px; font-weight:700; line-height:1.45; }
+    .live-preview { overflow:hidden; border:2px solid var(--teal); border-radius:7px; background:#0c1915; } .live-preview .camera-head { background:var(--surface); } .live-preview img { display:block; width:100%; aspect-ratio:16/8.5; object-fit:contain; background:#0c1915; } .live-preview .camera-foot { background:var(--surface); }
+    .calibration { display:grid; gap:12px; border:1px solid var(--line); border-radius:7px; background:var(--surface); padding:16px; } .calibration h2 { margin:0; font-size:19px; } .calibration-copy { color:var(--muted); font-size:13px; font-weight:700; line-height:1.5; } .calibration-frame { position:relative; overflow:hidden; border:2px solid var(--teal); border-radius:6px; background:#0c1915; cursor:crosshair; } .calibration-frame img { display:block; width:100%; max-height:560px; aspect-ratio:16/8.5; object-fit:contain; } .calibration-frame svg, #calibrationDots { position:absolute; pointer-events:none; } .lane-centreline { fill:none; stroke:#26cf77; stroke-width:.008; stroke-linecap:round; stroke-linejoin:round; vector-effect:non-scaling-stroke; } .lane-dot { position:absolute; width:22px; height:22px; transform:translate(-50%,-50%); border:2px solid #fff; border-radius:50%; background:#12b866; color:#062b1d; display:grid; place-items:center; font-size:11px; font-weight:900; box-shadow:0 0 0 2px rgba(18,184,102,.45); pointer-events:none; } .calibration-grid { display:grid; grid-template-columns:1fr auto; gap:10px; align-items:center; } .lane-picker { display:flex; flex-wrap:wrap; gap:7px; } .lane-picker button { min-width:42px; } .calibration-status { color:var(--muted); font-size:13px; font-weight:800; } .vd-mapping { border-top:1px solid var(--line); padding-top:12px; display:grid; gap:8px; } .vd-mapping-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(176px,1fr)); gap:8px; } .vd-mapping label { display:grid; gap:4px; color:var(--muted); font-size:12px; font-weight:800; } .vd-mapping select { width:100%; min-height:38px; border:1px solid var(--line); border-radius:6px; background:#fff; color:var(--ink); font:inherit; font-weight:800; padding:6px; } .camera-calibrate { margin-left:auto; } .camera-calibrate[data-ready="true"] { border-color:#12a35d; color:#0c6a3d; }
+    @media (max-width:680px) { .summary { grid-template-columns:repeat(2,minmax(0,1fr)); } .lane-speeds { grid-template-columns:repeat(2,minmax(0,1fr)); } .grid { grid-template-columns:1fr; } .sequence { grid-template-columns:repeat(5,minmax(0,1fr)); } h1 { font-size:21px; } }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div><p class="eyebrow">Corridor Observer／測試模式</p><h1>國三南向｜新店至楊梅</h1></div>
+      <div class="controls"><label class="preview-selector">大預覽<select id="previewCameraSelect" aria-label="選擇大預覽鏡頭"></select></label><button id="liveMode" data-active="true" type="button">即時資料</button><button id="simulationMode" data-active="false" type="button">時間模擬</button><button id="toggleTour" type="button">巡播十支鏡頭</button></div>
+    </header>
+    <div class="controls" id="simulationControls" hidden><button id="startSimulation" type="button">開始模擬</button><button id="restartSimulation" type="button">從起點重播</button><button data-speed="1" data-active="true" type="button">1x</button><button data-speed="10" data-active="false" type="button">10x</button><button data-speed="60" data-active="false" type="button">60x</button><button id="injectFailure" type="button">模擬第 4 支失敗</button></div>
+    <section class="summary" aria-label="走廊狀態"><div class="metric"><span>服務狀態</span><strong id="serviceState">等待連線</strong></div><div class="metric"><span>鏡頭可用</span><strong id="cameraHealth">-- / 10</strong></div><div class="metric"><span>目前鏡頭</span><strong id="currentCamera">--</strong></div><div class="metric"><span>下一支預載</span><strong id="nextCamera">--</strong></div></section>
+    <div class="notice" id="eventText">等待後台第一次收集快照。</div>
+    <section class="decision" aria-label="駕駛決策輸出">
+      <div class="decision-head"><div><p class="eyebrow">駕駛決策輸出</p><h2 id="decisionTitle">等待官方車道速度</h2></div><span class="decision-status" id="decisionStatus">更新中</span></div>
+      <div class="lane-speeds" id="laneSpeeds"></div>
+      <p class="decision-copy" id="laneRecommendation">尚未取得已對位的官方 VD 車道資料。</p>
+      <p class="route-pending" id="routeRecommendation">最快到目的地：尚未啟用導航 ETA，因此不以單一鏡頭速度宣稱哪一條完整道路最快。</p>
+    </section>
+    <section class="live-preview" aria-label="目前鏡頭即時串流">
+      <div class="camera-head"><strong id="liveStreamTitle">目前鏡頭即時串流</strong><span id="liveStreamMeta">等待連線</span></div>
+      <img id="liveStreamImage" alt="目前鏡頭即時串流">
+      <div class="camera-foot" id="liveStreamStatus">這是 MJPEG 即時串流；實際更新頻率以官方來源與 Relay 為準。</div>
+    </section>
+    <section class="calibration" aria-label="人工車道校正">
+      <div><p class="eyebrow">人工校正資料</p><h2 id="calibrationTitle">選擇鏡頭後校正</h2></div>
+      <p class="calibration-copy">先設定主線車道數，再選擇車道並由近端往遠端點選四個中心線點。綠點與綠線只標示各車道的行駛參考線，不標示車輛。</p>
+      <div class="calibration-grid"><div class="controls"><span class="muted">主線車道數</span><div class="lane-picker" id="laneCountPicker"></div></div><button id="clearCalibration" type="button">清除本鏡頭標記</button></div>
+      <div class="controls"><span class="muted">正在標記</span><div class="lane-picker" id="lanePicker"></div><span class="calibration-status" id="calibrationStatus">等待鏡頭快照</span></div>
+      <div class="vd-mapping" aria-label="官方 VD 車道對位"><div><p class="eyebrow">官方 VD 車道對位</p><p class="calibration-copy" id="vdMappingStatus">等待同向官方 VD 資料。</p></div><div class="vd-mapping-grid" id="vdLaneMapping"></div><div class="controls" id="vdMappingControls"></div></div>
+      <div class="calibration-frame" id="calibrationFrame"><img id="calibrationImage" alt="人工車道校正快照"><svg id="calibrationPaths" viewBox="0 0 1 1" preserveAspectRatio="none" aria-hidden="true"></svg><div id="calibrationDots" aria-hidden="true"></div></div>
+      <div class="controls"><button id="saveCalibration" type="button">儲存本鏡頭校正</button><button id="exportCalibrations" type="button">匯出校正資料 JSON</button></div>
+    </section>
+    <section class="sequence" id="sequence" aria-label="十支主線鏡頭序列"></section>
+    <section class="grid" id="cameraGrid" aria-label="鏡頭快照"></section>
+  </main>
+  <script>
+    const corridorId = 'n3-south-xindian-yangmei';
+    const statusUrl = `/v1/corridors/${corridorId}`;
+    const outputUrl = `${statusUrl}/output`;
+    const snapshotUrl = (id) => `/v1/corridors/${corridorId}/snapshots/${encodeURIComponent(id)}`;
+    const liveMjpegUrl = (id) => {
+      const base=String(state.status?.relayBase || '').replace(/\/$/, '');
+      return base && id ? `${base}/mjpeg/${encodeURIComponent(id)}` : '';
+    };
+    const calibrationStorageKey = `corridor-calibration-${corridorId}-v1`;
+    const requestedCameraId = new URLSearchParams(window.location.search).get('camera') || '';
+    const state = { mode:'live', status:null, output:null, index:0, elapsed:0, speed:1, running:false, failure:false, failureHandled:false, tick:0, tourTimer:0, tourActive:false, calibrationCameraId:requestedCameraId, deepLinkApplied:false, calibrationLane:0, calibrations:loadCalibrations() };
+    const $ = (id) => document.getElementById(id);
+    const current = () => state.status?.cameras?.[state.index];
+    const next = () => state.status?.cameras?.[Math.min(state.index + 1, (state.status?.cameras?.length || 1) - 1)];
+    const formatAge = (age) => age === null || age === undefined ? '尚未取得' : `${Math.max(0, Math.round(age / 1000))} 秒前`;
+    function renderLiveStream() {
+      const camera=current(); const image=$('liveStreamImage');
+      $('liveStreamTitle').textContent=camera ? `${camera.mile}｜${camera.label} 即時串流` : '目前鏡頭即時串流';
+      $('liveStreamMeta').textContent=camera?.state === 'ready' ? `${camera.sourceFps || '--'} FPS` : '等待來源';
+      $('liveStreamStatus').textContent=camera?.state === 'ready'
+        ? `Relay 直送 MJPEG｜最近畫面 ${formatAge(camera.ageMs)}｜此區會持續更新；下方校正區刻意使用固定快照。`
+        : '尚未取得此鏡頭的即時來源；保留上次成功畫面並自動重試。';
+      const source=liveMjpegUrl(camera?.id);
+      if (!source || image.dataset.cameraId===camera?.id) return;
+      image.dataset.cameraId=camera.id;
+      image.src=`${source}?t=${Date.now()}`;
+    }
+    function retryLiveStream() {
+      const camera=current(); const image=$('liveStreamImage'); const source=liveMjpegUrl(camera?.id);
+      if (!source) return;
+      window.clearTimeout(Number(image.dataset.retryTimer || 0));
+      image.dataset.retryTimer=String(window.setTimeout(()=>{ image.src=`${source}?t=${Date.now()}`; },2500));
+    }
+    function stopCameraTour() {
+      window.clearInterval(state.tourTimer); state.tourTimer=0; state.tourActive=false; $('toggleTour').textContent='巡播十支鏡頭';
+    }
+    function startCameraTour() {
+      const count=state.status?.cameras?.length||0; if (!count) return;
+      state.tourActive=true; $('toggleTour').textContent='停止巡播';
+      state.tourTimer=window.setInterval(()=>{
+        if (state.mode!=='live' || !state.status?.cameras?.length) return stopCameraTour();
+        state.index=(state.index+1)%state.status.cameras.length;
+        $('eventText').textContent=`巡播中：${current()?.mile}｜${current()?.label}，下一支 ${next()?.mile||'--'} 已待命。`;
+        render();
+      },10000);
+    }
+    function outputCamera() { return state.output?.cameras?.[state.index] || null; }
+    function outputForCamera(cameraId) { return state.output?.cameras?.find((camera)=>camera.id===cameraId) || null; }
+    function formatSourceTime(value) {
+      const date=new Date(String(value||''));
+      return Number.isFinite(date.getTime()) ? `VD ${date.toLocaleTimeString('zh-TW',{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false})}` : 'VD 時間待確認';
+    }
+    function monitorMarkup(camera) {
+      const road=outputForCamera(camera.id)?.road;
+      const lanes=road?.lanes?.length ? road.lanes : road?.lastKnownLanes||[]; const recommendation=road?.recommendation;
+      const stateLabel=road?.state==='ready' ? '官方 VD 已對位' : road?.state==='stale' ? '官方資料延遲' : '車道資料等待中';
+      const laneMarkup=lanes.map((lane)=>`<div class="mini-lane${recommendation?.laneIndex===lane.laneIndex?' recommended':''}"><span>左至右 ${lane.laneIndex}</span><strong>${lane.speedKph ?? '--'}</strong><span>km/h</span></div>`).join('');
+      return `<div class="monitor-status" data-state="${road?.state||'waiting'}"><span>${stateLabel}</span><span>${formatSourceTime(road?.sourceDataTime)}</span></div>${laneMarkup?`<div class="mini-lanes${road?.state==='stale'?' stale':''}">${laneMarkup}</div>`:''}<p class="monitor-detail">${recommendation?.detail||road?.detail||'等待官方 VD 資料。'}</p>`;
+    }
+    function renderDecision() {
+      const camera=outputCamera(); const lanes=camera?.road?.lanes || []; const recommendation=camera?.road?.recommendation;
+      const isStale=camera?.road?.state === 'stale';
+      $('decisionTitle').textContent=camera ? `${camera.mile}｜${camera.label} ${isStale ? '官方資料延遲' : '車道流況'}` : '等待官方車道速度';
+      $('decisionStatus').textContent=camera?.road?.state === 'ready' ? '官方 VD 已對位' : isStale ? '暫停推薦' : '等待官方資料';
+      $('laneSpeeds').replaceChildren(...lanes.map((lane)=>{
+        const item=document.createElement('div'); item.className=`lane-speed${recommendation?.laneIndex===lane.laneIndex?' recommended':''}`;
+        item.innerHTML=`<span>畫面由左至右第 ${lane.laneIndex} 車道</span><strong>${lane.speedKph ?? '--'} km/h</strong><span>占有率 ${lane.occupancy ?? '--'}%｜流量 ${lane.volume ?? '--'}</span>`;
+        return item;
+      }));
+      if (!lanes.length) $('laneSpeeds').innerHTML='<div class="lane-speed"><span>官方車道速度</span><strong>--</strong><span>資料等待中</span></div>';
+      $('laneRecommendation').textContent=recommendation?.detail || (camera?.road?.state === 'ready'
+        ? '各主線車道速度差異未達可安全推薦門檻，維持目前車道並注意現場標誌。'
+        : camera?.road?.detail || '尚未取得已對位的官方 VD 車道資料。');
+      $('routeRecommendation').textContent='最快到目的地：尚未啟用導航 ETA 與替代道路比較；本頁只提供目前國三南向走廊的官方車道流況參考。';
+    }
+    function loadCalibrations() { try { const saved=JSON.parse(localStorage.getItem(calibrationStorageKey) || '{}'); return saved && typeof saved === 'object' ? saved : {}; } catch { return {}; } }
+    function activeCalibrationCamera() { return state.status?.cameras?.find((camera) => camera.id === state.calibrationCameraId) || current() || null; }
+    function calibrationFor(camera) {
+      if (!camera) return null;
+      if (!state.calibrations[camera.id]) state.calibrations[camera.id] = { laneCount: 3, lanes: {}, vdLaneMap: {}, excludedVdLaneIds: [], vdMappingConfirmed: false, savedAt: null };
+      const calibration=state.calibrations[camera.id];
+      if (!calibration.vdLaneMap) calibration.vdLaneMap = {};
+      if (!Array.isArray(calibration.excludedVdLaneIds)) calibration.excludedVdLaneIds = [];
+      if (calibration.vdMappingConfirmed !== true) calibration.vdMappingConfirmed = false;
+      return calibration;
+    }
+    function calibrationIsComplete(calibration) {
+      return Boolean(calibration) && Array.from({length:calibration.laneCount},(_,laneIndex)=>(calibration.lanes[laneIndex]||[]).length===4).every(Boolean);
+    }
+    function persistCalibrations() { localStorage.setItem(calibrationStorageKey, JSON.stringify(state.calibrations)); }
+    function selectCalibrationCamera(cameraId) {
+      state.calibrationCameraId=cameraId; state.calibrationLane=0;
+      const url=new URL(window.location.href); url.searchParams.set('camera',cameraId); window.history.replaceState({},'',url);
+      renderCalibration();
+    }
+    function pointLabel(laneIndex, pointIndex) { return `${laneIndex + 1}-${pointIndex + 1}`; }
+    function visualLaneLabel(laneIndex, laneCount) {
+      if (laneCount === 3) return ['畫面最左車道','畫面中央車道','畫面最右車道'][laneIndex];
+      if (laneCount === 4) return ['畫面最左車道','畫面左中車道','畫面右中車道','畫面最右車道'][laneIndex];
+      return `畫面由左數第 ${laneIndex + 1} 車道`;
+    }
+    function calibrationContentBox() {
+      const image=$('calibrationImage');
+      if (!image.naturalWidth || !image.naturalHeight || !image.clientWidth || !image.clientHeight) return null;
+      const imageRatio=image.naturalWidth/image.naturalHeight; const boxRatio=image.clientWidth/image.clientHeight;
+      const width=boxRatio>imageRatio ? image.clientHeight*imageRatio : image.clientWidth;
+      const height=boxRatio>imageRatio ? image.clientHeight : image.clientWidth/imageRatio;
+      return { left:image.offsetLeft+(image.clientWidth-width)/2, top:image.offsetTop+(image.clientHeight-height)/2, width, height };
+    }
+    function positionCalibrationOverlay() {
+      const box=calibrationContentBox();
+      for (const overlay of [$('calibrationPaths'),$('calibrationDots')]) {
+        overlay.style.left=box ? `${box.left}px` : '0'; overlay.style.top=box ? `${box.top}px` : '0';
+        overlay.style.width=box ? `${box.width}px` : '0'; overlay.style.height=box ? `${box.height}px` : '0';
+      }
+      return box;
+    }
+    function renderVdLaneMapping(camera, calibration) {
+      const status=$('vdMappingStatus'); const mapping=$('vdLaneMapping'); const controls=$('vdMappingControls'); mapping.replaceChildren(); controls.replaceChildren();
+      const observation=camera?.lane;
+      if (!observation?.lanes?.length) { status.textContent='尚未取得同向官方 VD 車道資料，暫不對位也不顯示每車道速度。'; return; }
+      if (observation.lanes.length < calibration.laneCount) { status.textContent=`人工中心線 ${calibration.laneCount} 條；此刻官方 VD ${observation.mainLaneCount} 條。官方資料不足，暫不轉換速度。`; return; }
+      const mappedIds=Array.from({length:calibration.laneCount},(_,index)=>String(calibration.vdLaneMap[index+1]||''));
+      const officialIds=observation.lanes.map((lane)=>String(lane.laneId));
+      const excludedIds=[...new Set(calibration.excludedVdLaneIds.map(String).filter((laneId)=>officialIds.includes(laneId)))];
+      calibration.excludedVdLaneIds=excludedIds;
+      const hasCompleteMap=mappedIds.every(Boolean) && new Set(mappedIds).size===calibration.laneCount;
+      const expectedExclusions=observation.lanes.length-calibration.laneCount;
+      const hasCompleteExclusions=excludedIds.length===expectedExclusions && excludedIds.every((laneId)=>!mappedIds.includes(laneId));
+      status.textContent=calibration.vdMappingConfirmed
+        ? '此鏡頭已確認畫面左至右車道與官方 VD 對位，可交付官方速度參考。'
+        : hasCompleteMap && hasCompleteExclusions
+          ? '目前為暫定對位；確認前不會輸出為駕駛車道推薦。'
+          : expectedExclusions > 0
+            ? `官方 VD 比主線多 ${expectedExclusions} 筆；請明確標註路肩、匝道或輔助車道後再確認對位。`
+          : '你的中心線 1／2／3 已代表畫面左／中／右；先用「依左至右暫定填入」產生測試對位。';
+      Array.from({length:calibration.laneCount},(_,laneIndex)=>{
+        const label=document.createElement('label'); label.textContent=`中心線 ${laneIndex+1}｜${visualLaneLabel(laneIndex,calibration.laneCount)}`;
+        const select=document.createElement('select'); select.dataset.laneIndex=String(laneIndex+1);
+        const empty=document.createElement('option'); empty.value=''; empty.textContent='選擇官方 VD 車道'; select.append(empty);
+        observation.lanes.forEach((lane)=>{const option=document.createElement('option');option.value=String(lane.laneId);option.textContent=`VD ${lane.laneId}｜${lane.speedKph ?? '--'} km/h`;option.disabled=excludedIds.includes(String(lane.laneId));option.selected=calibration.vdLaneMap[laneIndex+1]===String(lane.laneId);select.append(option);});
+        select.addEventListener('change',()=>{const selected=select.value;Object.keys(calibration.vdLaneMap).forEach((key)=>{if(calibration.vdLaneMap[key]===selected) delete calibration.vdLaneMap[key];});if(selected) { calibration.vdLaneMap[laneIndex+1]=selected; calibration.excludedVdLaneIds=calibration.excludedVdLaneIds.filter((laneId)=>String(laneId)!==selected); } else delete calibration.vdLaneMap[laneIndex+1];calibration.vdMappingConfirmed=false;persistCalibrations();renderVdLaneMapping(camera,calibration);});
+        label.append(select); mapping.append(label);
+      });
+      if (expectedExclusions > 0) {
+        const exclusion=document.createElement('label'); exclusion.textContent='不納入主線（路肩／匝道／輔助車道）';
+        const select=document.createElement('select'); select.dataset.role='vd-exclusion';
+        const empty=document.createElement('option'); empty.value=''; empty.textContent='選擇要排除的官方 VD 車道'; select.append(empty);
+        observation.lanes.forEach((lane)=>{const option=document.createElement('option');option.value=String(lane.laneId);option.textContent=`VD ${lane.laneId}｜${lane.speedKph ?? '--'} km/h`;option.disabled=mappedIds.includes(String(lane.laneId));option.selected=excludedIds.includes(String(lane.laneId));select.append(option);});
+        select.addEventListener('change',()=>{const selected=select.value;calibration.excludedVdLaneIds=selected?[selected]:[];if(selected) Object.keys(calibration.vdLaneMap).forEach((key)=>{if(calibration.vdLaneMap[key]===selected) delete calibration.vdLaneMap[key];});calibration.vdMappingConfirmed=false;persistCalibrations();renderVdLaneMapping(camera,calibration);});
+        exclusion.append(select); mapping.append(exclusion);
+      }
+      const apply=document.createElement('button'); apply.type='button'; apply.textContent='依畫面左至右暫定填入';
+      apply.disabled=expectedExclusions>0;
+      apply.addEventListener('click',()=>{calibration.vdLaneMap=Object.fromEntries(observation.lanes.slice(0,calibration.laneCount).map((lane,index)=>[index+1,String(lane.laneId)]));calibration.excludedVdLaneIds=[];calibration.vdMappingConfirmed=false;persistCalibrations();renderVdLaneMapping(camera,calibration);});
+      const confirm=document.createElement('button'); confirm.type='button'; confirm.textContent='確認此鏡頭對位並交付速度'; confirm.disabled=!hasCompleteMap || calibration.vdMappingConfirmed;
+      confirm.disabled=!hasCompleteMap || !hasCompleteExclusions || calibration.vdMappingConfirmed;
+      confirm.addEventListener('click',()=>{calibration.vdMappingConfirmed=true;persistCalibrations();$('eventText').textContent=`${camera.mile} 已確認官方 VD 對位；下一輪分析將輸出畫面車道速度參考。`;renderVdLaneMapping(camera,calibration);});
+      controls.append(apply,confirm);
+    }
+    function renderCalibration() {
+      const camera = activeCalibrationCamera();
+      const calibration = calibrationFor(camera);
+      if (!camera || !calibration) return;
+      if (state.calibrationLane >= calibration.laneCount) state.calibrationLane=0;
+      $('calibrationTitle').textContent = `${camera.mile}｜${camera.label} 人工車道校正`;
+      if ($('calibrationImage').dataset.cameraId !== camera.id) { $('calibrationImage').dataset.cameraId=camera.id; $('calibrationImage').src = `${snapshotUrl(camera.id)}?t=${Date.now()}`; }
+      $('laneCountPicker').replaceChildren(...[1,2,3,4,5,6].map((count) => { const button=document.createElement('button');button.type='button';button.textContent=String(count);button.dataset.active=String(calibration.laneCount===count);button.setAttribute('aria-label',`主線 ${count} 車道`);button.addEventListener('click',()=>{calibration.laneCount=count;Object.keys(calibration.lanes).forEach((key)=>{if(Number(key)>=count) delete calibration.lanes[key];});calibration.vdLaneMap={};calibration.excludedVdLaneIds=[];calibration.vdMappingConfirmed=false;calibration.savedAt=null;persistCalibrations();state.calibrationLane=Math.min(state.calibrationLane,count-1);renderCalibration();});return button;}));
+      $('lanePicker').replaceChildren(...Array.from({length:calibration.laneCount},(_,laneIndex)=>{const button=document.createElement('button');button.type='button';const points=calibration.lanes[laneIndex]||[];button.textContent=`車道 ${laneIndex+1}（${points.length}/4）`;button.dataset.active=String(state.calibrationLane===laneIndex);button.addEventListener('click',()=>{state.calibrationLane=laneIndex;renderCalibration();});return button;}));
+      $('calibrationDots').replaceChildren(); $('calibrationPaths').replaceChildren();
+      renderVdLaneMapping(camera,calibration);
+      positionCalibrationOverlay();
+      Object.entries(calibration.lanes).forEach(([laneKey, points]) => {
+        if (!Array.isArray(points)) return;
+        if (points.length > 1) { const path=document.createElementNS('http://www.w3.org/2000/svg','polyline');path.setAttribute('class','lane-centreline');path.setAttribute('points',points.map((point)=>`${point.x},${point.y}`).join(' '));$('calibrationPaths').append(path); }
+        points.forEach((point,pointIndex)=>{const dot=document.createElement('span');dot.className='lane-dot';dot.style.left=`${point.x*100}%`;dot.style.top=`${point.y*100}%`;dot.textContent=pointLabel(Number(laneKey),pointIndex);$('calibrationDots').append(dot);});
+      });
+      const activePoints=calibration.lanes[state.calibrationLane]||[];
+      $('calibrationStatus').textContent = calibration.savedAt
+        ? `本鏡頭已自動儲存，可直接匯出 JSON`
+        : activePoints.length < 4 ? `車道 ${state.calibrationLane+1}：請點選由近至遠第 ${activePoints.length+1} 個中心線點` : `車道 ${state.calibrationLane+1} 已完成，可選下一條車道`;
+    }
+    function captureCalibrationPoint(event) {
+      const camera=activeCalibrationCamera(); const calibration=calibrationFor(camera); const image=$('calibrationImage');
+      if (!camera || !calibration || !image.naturalWidth || !image.naturalHeight) return;
+      const rect=image.getBoundingClientRect(); const box=calibrationContentBox(); if (!box) return;
+      const x=(event.clientX-rect.left-box.left)/box.width; const y=(event.clientY-rect.top-box.top)/box.height;
+      if (x<0 || x>1 || y<0 || y>1) return;
+      const points=calibration.lanes[state.calibrationLane] || []; if (points.length >= 4) return;
+      calibration.lanes[state.calibrationLane]=[...points,{x:Number(x.toFixed(4)),y:Number(y.toFixed(4))}];
+      calibration.savedAt=calibrationIsComplete(calibration) ? new Date().toISOString() : null;
+      persistCalibrations();
+      if (calibration.savedAt) $('eventText').textContent=`${camera.mile} 人工車道校正已自動儲存在此瀏覽器，可匯出 JSON 交付後台。`;
+      renderCalibration();
+    }
+    async function exportCalibrations() { const payload={corridorId,label:state.status?.label||'',exportedAt:new Date().toISOString(),calibrations:state.calibrations}; const response=await fetch(`${statusUrl}/calibrations`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}); const result=await response.json(); if(!response.ok) throw new Error(result.error||'calibration_export_failed'); $('eventText').textContent=`${result.calibrationCount} 支鏡頭校正 JSON 已交付本機 Observer：${result.file}`; }
+    function render() {
+      const cameras = state.status?.cameras || [];
+      if (state.calibrationCameraId && !cameras.some((camera)=>camera.id===state.calibrationCameraId)) state.calibrationCameraId='';
+      const selectedIndex=cameras.findIndex((camera)=>camera.id===state.calibrationCameraId);
+      if (selectedIndex>=0 && requestedCameraId && !state.deepLinkApplied) { state.index=selectedIndex; state.deepLinkApplied=true; }
+      const ready = cameras.filter((camera) => camera.state === 'ready').length;
+      $('serviceState').textContent = state.mode === 'simulation' ? (state.running ? '模擬運行中' : '模擬已暫停') : state.status?.ok ? '走廊可用' : '收集或檢查中';
+      $('cameraHealth').textContent = `${ready} / ${cameras.length || 10}`;
+      $('currentCamera').textContent = current()?.mile || '--';
+      $('nextCamera').textContent = next() && next() !== current() ? next().mile : '走廊完成';
+      $('previewCameraSelect').replaceChildren(...cameras.map((camera,index)=>{const option=document.createElement('option');option.value=String(index);option.textContent=`${camera.mile}｜${camera.label}`;option.selected=index===state.index;return option;}));
+      renderDecision();
+      renderLiveStream();
+      $('sequence').replaceChildren(...cameras.map((camera, index) => {
+        const button = document.createElement('button'); button.type='button'; button.className='slot'; button.textContent=camera.mile;
+        if (index === state.index) button.classList.add('current'); if (index === state.index + 1) button.classList.add('next'); if (state.failure && index === 3) button.classList.add('failed');
+        button.addEventListener('click', () => { state.index=index; selectCalibrationCamera(camera.id); render(); }); return button;
+      }));
+      $('cameraGrid').replaceChildren(...cameras.map((camera, index) => {
+        const article = document.createElement('article'); article.className='camera';
+        const image = `<img alt="${camera.label} ${camera.mile} 校正快照" src="${snapshotUrl(camera.id)}?t=${Date.now()}" onerror="this.style.opacity='.25'">`;
+        article.innerHTML = `<div class="camera-head"><strong>${camera.mile}｜${camera.label} 校正快照</strong><span>${camera.state === 'ready' ? `${formatAge(camera.ageMs)}｜${camera.sourceFps || '--'} FPS` : '等待中'}</span></div>${image}<div class="camera-foot">${index === state.index ? '目前鏡頭' : index === state.index + 1 ? '下一支預載' : `第 ${camera.sequence} 支`}<button class="camera-calibrate" type="button" data-ready="${Boolean(state.calibrations[camera.id]?.savedAt)}">校正</button>${monitorMarkup(camera)}</div>`;
+        article.querySelector('.camera-calibrate').addEventListener('click',()=>selectCalibrationCamera(camera.id));
+        return article;
+      }));
+      if (!state.calibrationCameraId && cameras[0]) state.calibrationCameraId=cameras[0].id;
+      renderCalibration();
+    }
+    async function refresh() { try { const [statusResponse, outputResponse]=await Promise.all([fetch(statusUrl,{cache:'no-store'}),fetch(outputUrl,{cache:'no-store'})]); state.status=await statusResponse.json(); state.output=outputResponse.ok ? await outputResponse.json() : null; if ($('eventText').textContent==='等待後台第一次收集快照。' && state.status?.ok) $('eventText').textContent='十支鏡頭共用串流已連線；持續保留最新成功畫面並進行背景分析。'; render(); } catch { $('eventText').textContent='無法連線 Corridor Observer；保留最後成功狀態。'; } }
+    function advance(now) { if (!state.running || state.mode !== 'simulation') return; if (!state.tick) state.tick=now; state.elapsed += (now-state.tick)/1000*state.speed; state.tick=now; const nextIndex=Math.min((state.status?.cameras?.length || 1)-1,Math.floor(state.elapsed/90)); if (nextIndex > state.index) { const failed=state.failure && !state.failureHandled && nextIndex >= 3; if (failed) { state.failureHandled=true; state.index=Math.min(4,(state.status.cameras.length-1)); $('eventText').textContent='第 4 支模擬失敗：保留前一張成功快照，下一支已接手。'; } else { state.index=nextIndex; if (!state.failureHandled) $('eventText').textContent=`${current()?.mile} 已完成背景預載，切換成功。`; } } render(); requestAnimationFrame(advance); }
+    $('liveMode').addEventListener('click',()=>{state.mode='live';state.running=false;$('liveMode').dataset.active='true';$('simulationMode').dataset.active='false';$('simulationControls').hidden=true;refresh();});
+    $('simulationMode').addEventListener('click',()=>{state.mode='simulation';state.running=false;stopCameraTour();$('liveMode').dataset.active='false';$('simulationMode').dataset.active='true';$('simulationControls').hidden=false;render();});
+    $('toggleTour').addEventListener('click',()=>{if(state.mode!=='live') { $('eventText').textContent='請先切回「即時資料」再巡播十支鏡頭。'; return; } if(state.tourActive) { stopCameraTour(); $('eventText').textContent='已停止巡播，保留目前鏡頭。'; } else { startCameraTour(); $('eventText').textContent=`開始巡播：每 10 秒切換下一支，目前 ${current()?.mile||'--'}。`; }});
+    $('previewCameraSelect').addEventListener('change',()=>{const index=Number($('previewCameraSelect').value);if(!Number.isInteger(index)||!state.status?.cameras?.[index])return;stopCameraTour();state.index=index;const camera=current();$('eventText').textContent=`已手動切換大預覽：${camera.mile}｜${camera.label}。`;render();});
+    $('startSimulation').addEventListener('click',()=>{state.running=!state.running;state.tick=0;$('startSimulation').textContent=state.running?'暫停模擬':'繼續模擬';if(state.running)requestAnimationFrame(advance);render();});
+    $('restartSimulation').addEventListener('click',()=>{state.index=0;state.elapsed=0;state.tick=0;state.failureHandled=false;$('eventText').textContent='已回到新店起點；目前鏡頭與下一支均已預載。';render();});
+    document.querySelectorAll('[data-speed]').forEach((button)=>button.addEventListener('click',()=>{state.speed=Number(button.dataset.speed);document.querySelectorAll('[data-speed]').forEach((item)=>item.dataset.active=String(item===button));}));
+    $('injectFailure').addEventListener('click',()=>{state.failure=!state.failure;state.failureHandled=false;$('injectFailure').textContent=state.failure?'取消第 4 支失敗':'模擬第 4 支失敗';$('eventText').textContent=state.failure?'第 4 支將在模擬時回報失敗。':'模擬鏡頭序列恢復正常。';render();});
+    $('calibrationImage').addEventListener('click',captureCalibrationPoint);
+    $('calibrationImage').addEventListener('load',renderCalibration);
+    $('liveStreamImage').addEventListener('error',retryLiveStream);
+    window.addEventListener('resize',renderCalibration);
+    $('clearCalibration').addEventListener('click',()=>{const camera=activeCalibrationCamera();if(!camera)return;delete state.calibrations[camera.id];persistCalibrations();state.calibrationLane=0;renderCalibration();});
+    $('saveCalibration').addEventListener('click',()=>{const camera=activeCalibrationCamera();const calibration=calibrationFor(camera);if(!camera||!calibration)return;if(!calibrationIsComplete(calibration)){$('calibrationStatus').textContent='每條主線車道都需完成四個中心線點後才能儲存。';return;}calibration.savedAt=new Date().toISOString();persistCalibrations();$('eventText').textContent=`${camera.mile} 人工車道校正已儲存在此瀏覽器，可匯出 JSON 交付後台。`;render();});
+    $('exportCalibrations').addEventListener('click',()=>exportCalibrations().catch((error)=>{$('eventText').textContent=`校正資料匯出失敗：${error.message}`;}));
+    refresh(); setInterval(refresh,2500);
+  </script>
+</body>
+</html>

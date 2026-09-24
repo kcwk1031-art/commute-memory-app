@@ -1,0 +1,9 @@
+{
+  "name": "commute-corridor-observer",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server.mjs",
+    "check": "node --check server.mjs && node --check corridor-config.mjs && node --check corridor-state.mjs && node --check calibration-store.mjs && node --check analysis-contract.mjs && node --check official-lane-reference.mjs && node --check mjpeg-parser.mjs && node --check corridor-output.mjs && node --check trip-session-store.mjs && node --check visual-flow.mjs && python -m py_compile analysis-worker.py && node --test test/corridor-config.test.mjs test/pilot-calibration.test.mjs test/calibration-store.test.mjs test/analysis-contract.test.mjs test/official-lane-reference.test.mjs test/mjpeg-parser.test.mjs test/corridor-output.test.mjs test/trip-session-store.test.mjs test/visual-flow.test.mjs"
+  }
+}
