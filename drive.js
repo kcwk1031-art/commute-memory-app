@@ -19,7 +19,8 @@ const TDX_CCTV_URL = "https://tdx.transportdata.tw/api/basic/v2/Road/Traffic/CCT
 const CAMERA_CATALOG_REFRESH_MS = 15 * 60 * 1000;
 const PERSISTED_CAMERA_CATALOG_MAX_AGE_MS = 14 * 24 * 60 * 60 * 1000;
 const ROAD_REFRESH_MS = 15 * 1000;
-const LANE_REFRESH_MS = 60 * 1000;
+// Recheck the active camera frequently; Relay coalesces simultaneous callers.
+const LANE_REFRESH_MS = 20 * 1000;
 const MAX_CAMERA_DISTANCE_METERS = 5000;
 const CAMERA_SWITCH_METERS = 500;
 const DESTINATION_CANDIDATE_MAX_DISTANCE_METERS = 15000;
