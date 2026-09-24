@@ -31,6 +31,8 @@ const OFFICIAL_STREAM_CONNECT_TIMEOUT_MS = 7500;
 const RELAY_STREAM_CONNECT_TIMEOUT_MS = 8500;
 const SNAPSHOT_CONNECT_TIMEOUT_MS = 5000;
 const SNAPSHOT_FALLBACK_REFRESH_MS = 4000;
+const NEXT_CAMERA_SNAPSHOT_MAX_AGE_MS = 25 * 1000;
+const MAX_CAMERA_FALLBACK_HOPS = 2;
 const MIN_COURSE_DISTANCE_METERS = 32;
 const MIN_COURSE_INTERVAL_SECONDS = 2;
 const MAX_COURSE_INTERVAL_SECONDS = 75;
@@ -141,6 +143,8 @@ const state = {
   reconnectTimer: null,
   streamConnectTimer: null,
   snapshotRefreshTimer: null,
+  nextCameraPreload: null,
+  cameraFallbackHops: 0,
   reconnectAttempts: 0,
   imageToken: 0,
   streamTransport: "",
@@ -730,6 +734,88 @@ function selectNearbyReferenceCamera(point) {
   };
 }
 
+function kilometersFromCamera(camera) {
+  const match = String(camera?.mile || "").match(/^(\d+)K\+(\d{3})$/i);
+  return match ? Number(match[1]) + Number(match[2]) / 1000 : NaN;
+}
+
+function findNextMainlineCamera(camera) {
+  const currentKilometers = kilometersFromCamera(camera);
+  const direction = normalizeDirectionCode(camera?.direction, camera?.id);
+  if (!Number.isFinite(currentKilometers) || !direction) return null;
+  const forwardSign = ["S", "E"].includes(direction) ? 1 : -1;
+  return state.cctvs
+    .filter((candidate) => candidate.id !== camera.id)
+    .filter((candidate) => !isRampCamera(candidate))
+    .filter((candidate) => cameraRouteKey(candidate) === cameraRouteKey(camera))
+    .filter((candidate) => normalizeDirectionCode(candidate.direction, candidate.id) === direction)
+    .map((candidate) => ({ ...candidate, deltaKilometers: (kilometersFromCamera(candidate) - currentKilometers) * forwardSign }))
+    .filter((candidate) => Number.isFinite(candidate.deltaKilometers) && candidate.deltaKilometers >= 0.05)
+    .sort((left, right) => left.deltaKilometers - right.deltaKilometers)[0] || null;
+}
+
+function discardNextCameraPreload() {
+  const objectUrl = state.nextCameraPreload?.objectUrl;
+  if (objectUrl) URL.revokeObjectURL(objectUrl);
+  state.nextCameraPreload = null;
+}
+
+function preloadNextCameraSnapshot(camera) {
+  const next = findNextMainlineCamera(camera);
+  const relayBase = getRelayBases()[0];
+  if (!next || !relayBase) return;
+  if (state.nextCameraPreload?.cameraId === next.id && Date.now() - state.nextCameraPreload.loadedAt <= NEXT_CAMERA_SNAPSHOT_MAX_AGE_MS) return;
+  discardNextCameraPreload();
+  const url = `${relayBase}/latest/${encodeURIComponent(next.id)}?t=${Date.now()}`;
+  fetch(url, { cache: "no-store" })
+    .then((response) => {
+      if (!response.ok) throw new Error(`next_snapshot_${response.status}`);
+      return response.blob();
+    })
+    .then((blob) => {
+      if (!state.active || state.currentCamera?.id !== camera.id) return;
+      state.nextCameraPreload = { cameraId: next.id, camera: next, objectUrl: URL.createObjectURL(blob), loadedAt: Date.now() };
+    })
+    .catch(() => {});
+}
+
+function showPreloadedCameraSnapshot(camera, token) {
+  const preload = state.nextCameraPreload;
+  if (!preload || preload.cameraId !== camera.id || Date.now() - preload.loadedAt > NEXT_CAMERA_SNAPSHOT_MAX_AGE_MS) return false;
+  const objectUrl = preload.objectUrl;
+  const preview = el.cctvPreview;
+  preview.onload = () => {
+    URL.revokeObjectURL(objectUrl);
+    if (token !== state.imageToken || !state.active || state.currentCamera?.id !== camera.id) return;
+    preview.hidden = false;
+    el.cctvImage.hidden = true;
+    el.cameraPlaceholder.hidden = true;
+    state.displayedCamera = camera;
+    state.previewLoadedAt = Date.now();
+    renderCameraContext(camera);
+    el.cameraOverlay.textContent = `${camera.road} ${directionLabel(camera.direction, camera.id)}｜${camera.mile || "里程待確認"}`;
+    el.cameraOverlay.hidden = false;
+    el.cameraStage.dataset.state = "ready";
+  };
+  preview.onerror = () => URL.revokeObjectURL(objectUrl);
+  preview.hidden = true;
+  preview.src = objectUrl;
+  state.nextCameraPreload = null;
+  return true;
+}
+
+function switchToNextCameraFallback(camera) {
+  if (state.cameraFallbackHops >= MAX_CAMERA_FALLBACK_HOPS) return false;
+  const next = findNextMainlineCamera(camera);
+  if (!next || state.currentCamera?.id !== camera.id) return false;
+  state.cameraFallbackHops += 1;
+  state.currentCamera = next;
+  el.cameraStatus.textContent = "目前鏡頭無回應，切換下一支前方影像";
+  loadCameraStream(next);
+  void refreshLaneObservation(next);
+  return true;
+}
+
 function streamSources(camera) {
   const sources = [];
   const officialUrl = String(camera.mediaUrl || "").trim();
@@ -935,6 +1021,7 @@ function handleStreamFailure(camera, token, hadVisibleImage, sourceIndex) {
     }, delay);
     return;
   }
+  if (switchToNextCameraFallback(camera)) return;
   if (hadVisibleImage) {
     el.cameraStage.dataset.state = "ready";
     el.cameraPlaceholder.hidden = true;
@@ -964,7 +1051,8 @@ function loadCameraStream(camera, isReconnect = false, sourceIndex = 0) {
   if (hadVisibleImage) {
     // Keep the last confirmed frame visible while a new camera is connecting.
     el.cameraStage.dataset.state = "ready";
-    el.cameraStatus.textContent = "切換影像中";
+    const usingPreloadedSnapshot = showPreloadedCameraSnapshot(camera, token);
+    el.cameraStatus.textContent = usingPreloadedSnapshot ? "已切換預載畫面，串流連線中" : "切換影像中";
     el.cameraPlaceholder.hidden = true;
   } else {
     state.imageLoadedAt = 0;
@@ -993,8 +1081,10 @@ function loadCameraStream(camera, isReconnect = false, sourceIndex = 0) {
     el.cameraOverlay.hidden = false;
     el.cameraStage.dataset.state = "ready";
     state.imageLoadedAt = Date.now();
+    state.cameraFallbackHops = 0;
     el.cameraStatus.textContent = stream.kind === "snapshot" ? "官方快照備援" : stream.label;
     updateImageAge();
+    preloadNextCameraSnapshot(camera);
     if (stream.kind === "snapshot" && state.active && state.currentCamera?.id === camera.id) {
       state.snapshotRefreshTimer = window.setTimeout(() => {
         if (state.active && state.currentCamera?.id === camera.id) loadCameraStream(camera, true, sourceIndex);
@@ -1215,6 +1305,8 @@ function startDrive() {
   state.lastPoint = null;
   state.currentCamera = null;
   state.displayedCamera = null;
+  discardNextCameraPreload();
+  state.cameraFallbackHops = 0;
   resetCourse();
   state.active = true;
   // Start from the bundled catalog before the first GPS callback so destination candidates can be prepared immediately.
@@ -1244,6 +1336,7 @@ function stopDrive() {
   state.refreshTimer = null;
   state.reconnectTimer = null;
   state.reconnectAttempts = 0;
+  state.cameraFallbackHops = 0;
   state.active = false;
   state.lastPoint = null;
   state.currentCamera = null;
@@ -1253,6 +1346,7 @@ function stopDrive() {
   state.imageLoadedAt = 0;
   state.previewLoadedAt = 0;
   state.streamTransport = "";
+  discardNextCameraPreload();
   state.laneRequestToken += 1;
   state.laneCameraId = "";
   state.laneObservation = null;
