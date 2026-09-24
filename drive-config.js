@@ -2,4 +2,5 @@
 window.DRIVE_CONFIG = {
   cctvProxyBase: "https://commute-cctv-relay.onrender.com",
   cctvRelayBase: "https://commute-cctv-relay.onrender.com",
+  observerBase: "https://commute-corridor-observer.onrender.com",
 };

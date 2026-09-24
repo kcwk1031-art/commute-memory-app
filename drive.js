@@ -22,6 +22,7 @@ const PERSISTED_CAMERA_CATALOG_MAX_AGE_MS = 14 * 24 * 60 * 60 * 1000;
 const ROAD_REFRESH_MS = 15 * 1000;
 // Recheck the active camera frequently; Relay coalesces simultaneous callers.
 const LANE_REFRESH_MS = 20 * 1000;
+const OBSERVER_REFRESH_MS = 20 * 1000;
 const MAX_CAMERA_DISTANCE_METERS = 5000;
 const CAMERA_SWITCH_METERS = 500;
 const DESTINATION_CANDIDATE_MAX_DISTANCE_METERS = 15000;
@@ -161,6 +162,10 @@ const state = {
   laneObservation: null,
   laneFetchedAt: 0,
   laneRequestToken: 0,
+  observerCameraId: "",
+  observerObservation: null,
+  observerFetchedAt: 0,
+  observerRequestToken: 0,
   roadRequestToken: 0,
   prefetchedLaneObservations: new Map(),
   testLoggingEnabled: testLoggingEnabled(localStorage),
@@ -201,6 +206,10 @@ function getDefaultRelayBase() {
   return normalizeRelayBase(window.DRIVE_CONFIG?.cctvRelayBase || "");
 }
 
+function getDefaultObserverBase() {
+  return normalizeRelayBase(window.DRIVE_CONFIG?.observerBase || "");
+}
+
 function getProxyBases() {
   return [...new Set([state.proxyBase, getDefaultProxyBase()].filter(Boolean))];
 }
@@ -214,6 +223,10 @@ function laneObservationPath(cameraId) {
   const laneCount = VERIFIED_MAINLINE_LANE_COUNTS.get(String(cameraId));
   const query = Number.isInteger(laneCount) ? `?mainLaneCount=${laneCount}` : "";
   return `/v1/lanes/${encodeURIComponent(cameraId)}${query}`;
+}
+
+function observerCameraPath(cameraId) {
+  return `/v1/corridors/n3-south-xindian-yangmei/output/${encodeURIComponent(cameraId)}`;
 }
 
 function isEligibleTestCamera(camera) {
@@ -416,6 +429,20 @@ function clearLaneCards() {
   el.laneCards.hidden = true;
 }
 
+function visualFlowNote() {
+  const observation = state.observerObservation;
+  if (state.observerCameraId !== state.currentCamera?.id || !observation?.ok) return "";
+  const flow = observation.camera?.visualFlow;
+  if (flow?.state !== "ready" || !Array.isArray(flow.lanes)) {
+    return flow?.state === "collecting" ? "影像車流趨勢蒐集中" : "";
+  }
+  const trendLabels = { increasing: "增加", decreasing: "減少", stable: "穩定" };
+  const lanes = flow.lanes
+    .filter((lane) => Number.isInteger(Number(lane?.laneIndex)))
+    .map((lane) => `第 ${lane.laneIndex} 車道 ${lane.latestVehicleCount} 輛／${trendLabels[lane.trend] || "觀測中"}`);
+  return lanes.length ? `影像車流觀測：${lanes.join("；")}（非車速）` : "";
+}
+
 function updateLaneDataAge() {
   if (!state.laneObservation?.ok) return;
   renderLaneObservation(state.laneObservation);
@@ -456,7 +483,8 @@ function renderLaneObservation(observation) {
     return;
   }
 
-  setLaneReference(guidance.title, guidance.detail, guidance.level);
+  const visualFlow = visualFlowNote();
+  setLaneReference(guidance.title, visualFlow ? `${guidance.detail}｜${visualFlow}` : guidance.detail, guidance.level);
   const cards = guidance.lanes.map((lane) => {
       const card = document.createElement("article");
       card.className = "lane-card";
@@ -1059,6 +1087,25 @@ async function refreshLaneObservation(camera, roadToken = state.roadRequestToken
   }
 }
 
+async function refreshVisualFlow(camera, roadToken = state.roadRequestToken) {
+  const observerBase = getDefaultObserverBase();
+  if (!observerBase || !camera?.id) return;
+  const isCurrent = state.observerCameraId === camera.id;
+  if (isCurrent && Date.now() - state.observerFetchedAt < OBSERVER_REFRESH_MS) return;
+  const token = ++state.observerRequestToken;
+  try {
+    const response = await timeoutFetch(`${observerBase}${observerCameraPath(camera.id)}`, { cache: "no-store" }, 5000);
+    const observation = await response.json().catch(() => ({ ok: false }));
+    if (roadToken !== state.roadRequestToken || token !== state.observerRequestToken || camera.id !== state.currentCamera?.id) return;
+    state.observerCameraId = camera.id;
+    state.observerObservation = response.ok ? observation : null;
+    state.observerFetchedAt = Date.now();
+    if (state.laneObservation?.ok) renderLaneObservation(state.laneObservation);
+  } catch (_) {
+    // The free observer can be cold-starting. Its optional trend never blocks official VD speed cards.
+  }
+}
+
 function pauseRoadDataForLowAccuracy(point) {
   state.laneRequestToken += 1;
   state.laneCameraId = "";
@@ -1410,7 +1457,10 @@ async function refreshRoadInformation(point) {
         el.cameraStatus.textContent = "影像連線重試中";
       }
     }
-    if (directionVerified) void refreshLaneObservation(selected, roadToken);
+    if (directionVerified) {
+      void refreshLaneObservation(selected, roadToken);
+      void refreshVisualFlow(selected, roadToken);
+    }
   } catch (error) {
     if (!isCurrentRequest()) return;
     setSource("道路判讀暫不可用", "error");
