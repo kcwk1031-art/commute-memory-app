@@ -14,7 +14,7 @@ import {
 import { resolveDestinationIntent } from "./drive-destination.js";
 import { buildLaneGuidance } from "./drive-guidance.js";
 import { STARTER_CCTV } from "./drive-starter-catalog.js";
-import { appendTestEvent, clearTestEvents, readTestEvents, setTestLoggingEnabled, testLoggingEnabled } from "./drive-test-log.js";
+import { appendTestEvent, clearTestEvents, readTestEvents, setTestLoggingEnabled, summariseTestEvents, testLoggingEnabled } from "./drive-test-log.js";
 
 const TDX_CCTV_URL = "https://tdx.transportdata.tw/api/basic/v2/Road/Traffic/CCTV/Freeway?$format=JSON";
 const CAMERA_CATALOG_REFRESH_MS = 15 * 60 * 1000;
@@ -228,18 +228,23 @@ function createTestLogSessionId() {
 function currentLaneReference() {
   const observation = state.laneObservation;
   const reference = observation?.screenFlowReference || observation?.flowReference || {};
+  const vdDataCollectTime = observation?.vd?.dataCollectTime || null;
+  const collectedAt = Date.parse(String(vdDataCollectTime || ""));
   return {
-    vdDataCollectTime: observation?.vd?.dataCollectTime || null,
+    vdDataCollectTime,
     fastestDisplayNumber: Number.isInteger(Number(reference.bestDisplayNumber)) ? Number(reference.bestDisplayNumber) : null,
     referenceState: reference.state || "unavailable",
+    officialAgeSeconds: Number.isFinite(collectedAt) ? Math.max(0, Math.round((Date.now() - collectedAt) / 1000)) : null,
   };
 }
 
 function refreshTestLogStatus() {
   if (!el.testLogStatus) return;
-  const count = readTestEvents(localStorage).length;
+  const summary = summariseTestEvents(readTestEvents(localStorage));
+  const gps = summary.gpsAccuracy.within20MetersPercent === null ? "GPS 待取得" : `GPS 20m 內 ${summary.gpsAccuracy.within20MetersPercent}%`;
+  const reference = summary.officialLaneReference.availablePercent === null ? "VD 待取得" : `車道參考 ${summary.officialLaneReference.availablePercent}%`;
   el.testLogStatus.textContent = state.testLoggingEnabled
-    ? `已啟用｜本機已記錄 ${count} 筆，不會自動上傳。`
+    ? `已啟用｜${summary.eventCount} 筆｜${gps}｜切鏡頭 ${summary.camera.changeCount} 次｜${reference}｜不會自動上傳。`
     : "未啟用｜不會保存 GPS 或測試診斷資料。";
 }
 
@@ -263,6 +268,7 @@ function recordTestEvent(type, point = state.lastPoint, speedKph = null, force =
       cameraId: state.currentCamera?.id || null,
       cameraDistanceMeters: Number.isFinite(state.currentCamera?.distance) ? Math.round(state.currentCamera.distance) : null,
       streamTransport: state.streamTransport || null,
+      imageAgeSeconds: state.imageLoadedAt ? Math.max(0, Math.round((Date.now() - state.imageLoadedAt) / 1000)) : null,
       calibratedTestMode: CALIBRATED_TEST_MODE,
     },
     laneReference: currentLaneReference(),
@@ -287,9 +293,10 @@ function updateTestLogging(enabled) {
 function exportTestLog() {
   const events = readTestEvents(localStorage);
   const payload = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     exportedAt: new Date().toISOString(),
     purpose: "commute_route_test_optimization",
+    summary: summariseTestEvents(events),
     events,
   };
   const href = URL.createObjectURL(new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" }));
