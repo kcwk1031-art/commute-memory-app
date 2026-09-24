@@ -232,6 +232,14 @@ const server = createServer((request, response) => {
     const status = corridorStatus(state, staleAfterMs);
     return sendJson(response, 200, buildCorridorOutput(status, { corridorId: CORRIDOR_ID, label: CORRIDOR_LABEL, relayBase }));
   }
+  const cameraOutputMatch = url.pathname.match(new RegExp(`^${basePath}/output/([A-Za-z0-9_.-]+)$`));
+  if (cameraOutputMatch) {
+    const output = buildCorridorOutput(corridorStatus(state, staleAfterMs), { corridorId: CORRIDOR_ID, label: CORRIDOR_LABEL, relayBase });
+    const camera = output.cameras.find((item) => item.id === cameraOutputMatch[1]);
+    return camera
+      ? sendJson(response, 200, { ok: output.ok, corridorId: CORRIDOR_ID, updatedAt: output.updatedAt, camera })
+      : sendJson(response, 404, { ok: false, error: "camera_not_found" });
+  }
   if (url.pathname === `${basePath}/trip-sessions` && request.method === "GET") {
     return sendJson(response, 200, { ok: true, sessions: tripSessions.list() });
   }
