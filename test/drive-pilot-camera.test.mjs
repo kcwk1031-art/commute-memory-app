@@ -23,3 +23,12 @@ test("does not advance while still approaching the active camera", () => {
     bearingToCurrent: 178,
   }), false);
 });
+
+test("mobile drive mode activates the current camera and prewarms the next Observer camera", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const source = await readFile(new URL("../drive.js", import.meta.url), "utf8");
+  assert.match(source, /function activateObserverCameraWindow\(camera\)/);
+  assert.match(source, /active-cameras/);
+  assert.match(source, /prewarmCameraId: next\?\.id \|\| null/);
+  assert.match(source, /void activateObserverCameraWindow\(camera\)/);
+});

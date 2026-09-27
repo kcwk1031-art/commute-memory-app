@@ -24,6 +24,7 @@ const ROAD_REFRESH_MS = 15 * 1000;
 // Recheck the active camera frequently; Relay coalesces simultaneous callers.
 const LANE_REFRESH_MS = 15 * 1000;
 const OBSERVER_REFRESH_MS = 15 * 1000;
+const OBSERVER_ACTIVATION_REFRESH_MS = 45 * 1000;
 const MAX_CAMERA_DISTANCE_METERS = 5000;
 const CAMERA_SWITCH_METERS = 500;
 const DESTINATION_CANDIDATE_MAX_DISTANCE_METERS = 15000;
@@ -167,6 +168,8 @@ const state = {
   observerObservation: null,
   observerFetchedAt: 0,
   observerRequestToken: 0,
+  observerActivationKey: "",
+  observerActivatedAt: 0,
   roadRequestToken: 0,
   prefetchedLaneObservations: new Map(),
   testLoggingEnabled: testLoggingEnabled(localStorage),
@@ -228,6 +231,10 @@ function laneObservationPath(cameraId) {
 
 function observerCameraPath(cameraId) {
   return `/v1/corridors/n3-south-xindian-yangmei/output/${encodeURIComponent(cameraId)}`;
+}
+
+function observerActiveCamerasPath() {
+  return "/v1/corridors/n3-south-xindian-yangmei/active-cameras";
 }
 
 function isEligibleTestCamera(camera) {
@@ -593,6 +600,26 @@ function prefetchNextRoadData(camera) {
   if (next) prefetchLaneObservation(next);
 }
 
+async function activateObserverCameraWindow(camera) {
+  const observerBase = getDefaultObserverBase();
+  if (!observerBase || !camera?.id || !isEligibleTestCamera(camera)) return;
+  const next = findNextMainlineCamera(camera);
+  const key = `${camera.id}:${next?.id || ""}`;
+  if (state.observerActivationKey === key && Date.now() - state.observerActivatedAt < OBSERVER_ACTIVATION_REFRESH_MS) return;
+  state.observerActivationKey = key;
+  try {
+    await timeoutFetch(`${observerBase}${observerActiveCamerasPath()}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ cameraId: camera.id, prewarmCameraId: next?.id || null }),
+    }, 5000);
+    state.observerActivatedAt = Date.now();
+  } catch (_) {
+    // Visual-flow analysis is optional. The direct Relay and official VD paths continue independently.
+    state.observerActivationKey = "";
+  }
+}
+
 function prepareDestinationCandidate(point) {
   const intent = resolveDestinationIntent(state.destination, point);
   if (!intent || !state.cctvs.length) return null;
@@ -937,6 +964,7 @@ function activateCalibratedTestCamera(camera, roadToken) {
     el.laneDataAge.textContent = "讀取中";
   }
   prefetchNextRoadData(camera);
+  void activateObserverCameraWindow(camera);
   if (changed || !state.imageLoadedAt) {
     try {
       loadCameraStream(camera);
@@ -1483,6 +1511,7 @@ async function refreshRoadInformation(point) {
       }
     }
     if (directionVerified) {
+      void activateObserverCameraWindow(selected);
       void refreshLaneObservation(selected, roadToken);
       void refreshVisualFlow(selected, roadToken);
     }
