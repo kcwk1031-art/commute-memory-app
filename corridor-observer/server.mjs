@@ -14,7 +14,9 @@ import { createTripSessionStore } from "./trip-session-store.mjs";
 const port = Number(process.env.PORT || 10000);
 const relayBase = String(process.env.RELAY_BASE || "https://commute-cctv-relay.onrender.com").replace(/\/$/, "");
 const snapshotPollMs = Math.max(2000, Number(process.env.SNAPSHOT_POLL_MS || 2500));
-const lanePollMs = Math.max(30000, Number(process.env.LANE_POLL_MS || 60000));
+// Relay shares one upstream VD refresh across the ten camera lookups, so lane
+// data can remain responsive without opening more video streams.
+const lanePollMs = Math.max(15 * 1000, Number(process.env.LANE_POLL_MS || 15 * 1000));
 const analysisBase = String(process.env.ANALYSIS_BASE || "http://127.0.0.1:10001").replace(/\/$/, "");
 const analysisPollMs = Math.max(5000, Number(process.env.ANALYSIS_POLL_MS || 10000));
 const mjpegReconnectMs = Math.max(1000, Number(process.env.MJPEG_RECONNECT_MS || 2500));
