@@ -56,6 +56,7 @@
     const corridorId = 'n3-south-xindian-yangmei';
     const statusUrl = `/v1/corridors/${corridorId}`;
     const outputUrl = `${statusUrl}/output`;
+    const activeCamerasUrl = `${statusUrl}/active-cameras`;
     const snapshotUrl = (id) => `/v1/corridors/${corridorId}/snapshots/${encodeURIComponent(id)}`;
     const liveMjpegUrl = (id) => {
       const base=String(state.status?.relayBase || '').replace(/\/$/, '');
@@ -63,11 +64,23 @@
     };
     const calibrationStorageKey = `corridor-calibration-${corridorId}-v1`;
     const requestedCameraId = new URLSearchParams(window.location.search).get('camera') || '';
-    const state = { mode:'live', status:null, output:null, index:0, elapsed:0, speed:1, running:false, failure:false, failureHandled:false, tick:0, tourTimer:0, tourActive:false, calibrationCameraId:requestedCameraId, deepLinkApplied:false, calibrationLane:0, calibrations:loadCalibrations() };
+    const state = { mode:'live', status:null, output:null, index:0, elapsed:0, speed:1, running:false, failure:false, failureHandled:false, tick:0, tourTimer:0, tourActive:false, activationKey:'', calibrationCameraId:requestedCameraId, deepLinkApplied:false, calibrationLane:0, calibrations:loadCalibrations() };
     const $ = (id) => document.getElementById(id);
     const current = () => state.status?.cameras?.[state.index];
     const next = () => state.status?.cameras?.[Math.min(state.index + 1, (state.status?.cameras?.length || 1) - 1)];
     const formatAge = (age) => age === null || age === undefined ? '尚未取得' : `${Math.max(0, Math.round(age / 1000))} 秒前`;
+    async function activateCurrentCameraWindow() {
+      const camera=current(); const upcoming=next();
+      if (!camera) return;
+      const key=`${camera.id}:${upcoming?.id||''}`;
+      if (state.activationKey===key) return;
+      state.activationKey=key;
+      try {
+        await fetch(activeCamerasUrl,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({cameraId:camera.id,prewarmCameraId:upcoming?.id})});
+      } catch {
+        state.activationKey='';
+      }
+    }
     function renderLiveStream() {
       const camera=current(); const image=$('liveStreamImage');
       $('liveStreamTitle').textContent=camera ? `${camera.mile}｜${camera.label} 即時串流` : '目前鏡頭即時串流';
@@ -261,6 +274,7 @@
       $('nextCamera').textContent = next() && next() !== current() ? next().mile : '走廊完成';
       $('previewCameraSelect').replaceChildren(...cameras.map((camera,index)=>{const option=document.createElement('option');option.value=String(index);option.textContent=`${camera.mile}｜${camera.label}`;option.selected=index===state.index;return option;}));
       renderDecision();
+      void activateCurrentCameraWindow();
       renderLiveStream();
       $('sequence').replaceChildren(...cameras.map((camera, index) => {
         const button = document.createElement('button'); button.type='button'; button.className='slot'; button.textContent=camera.mile;
@@ -277,7 +291,7 @@
       if (!state.calibrationCameraId && cameras[0]) state.calibrationCameraId=cameras[0].id;
       renderCalibration();
     }
-    async function refresh() { try { const [statusResponse, outputResponse]=await Promise.all([fetch(statusUrl,{cache:'no-store'}),fetch(outputUrl,{cache:'no-store'})]); state.status=await statusResponse.json(); state.output=outputResponse.ok ? await outputResponse.json() : null; if ($('eventText').textContent==='等待後台第一次收集快照。' && state.status?.ok) $('eventText').textContent='十支鏡頭共用串流已連線；持續保留最新成功畫面並進行背景分析。'; render(); } catch { $('eventText').textContent='無法連線 Corridor Observer；保留最後成功狀態。'; } }
+    async function refresh() { try { const [statusResponse, outputResponse]=await Promise.all([fetch(statusUrl,{cache:'no-store'}),fetch(outputUrl,{cache:'no-store'})]); state.status=await statusResponse.json(); state.output=outputResponse.ok ? await outputResponse.json() : null; if ($('eventText').textContent==='等待後台第一次收集快照。' && state.status?.activeCameraIds?.length) $('eventText').textContent='目前鏡頭與下一支已啟動即時收集；其餘鏡頭保留快照與官方 VD 資料，降低免費服務負載。'; render(); } catch { $('eventText').textContent='無法連線 Corridor Observer；保留最後成功狀態。'; } }
     function advance(now) { if (!state.running || state.mode !== 'simulation') return; if (!state.tick) state.tick=now; state.elapsed += (now-state.tick)/1000*state.speed; state.tick=now; const nextIndex=Math.min((state.status?.cameras?.length || 1)-1,Math.floor(state.elapsed/90)); if (nextIndex > state.index) { const failed=state.failure && !state.failureHandled && nextIndex >= 3; if (failed) { state.failureHandled=true; state.index=Math.min(4,(state.status.cameras.length-1)); $('eventText').textContent='第 4 支模擬失敗：保留前一張成功快照，下一支已接手。'; } else { state.index=nextIndex; if (!state.failureHandled) $('eventText').textContent=`${current()?.mile} 已完成背景預載，切換成功。`; } } render(); requestAnimationFrame(advance); }
     $('liveMode').addEventListener('click',()=>{state.mode='live';state.running=false;$('liveMode').dataset.active='true';$('simulationMode').dataset.active='false';$('simulationControls').hidden=true;refresh();});
     $('simulationMode').addEventListener('click',()=>{state.mode='simulation';state.running=false;stopCameraTour();$('liveMode').dataset.active='false';$('simulationMode').dataset.active='true';$('simulationControls').hidden=false;render();});

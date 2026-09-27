@@ -4,13 +4,19 @@ This is an isolated test service for the National 3 southbound corridor from Xin
 
 ## What it does
 
-- Keeps one shared MJPEG subscription per fixed, mainline-only camera and retains the latest valid frame in service memory.
+- Keeps one shared MJPEG subscription for the active camera and one prewarmed next camera; the remaining cameras retain their last successful frame only.
 - Returns the last successful image while the next collection attempt is retried.
 - Collects official VD lane observations independently of the image cache.
-- Sends the latest retained frame to a local OpenCV worker and returns only calibrated lane vehicle counts. It does not publish CCTV-derived speed.
+- Sends only the two active retained frames to a local OpenCV worker and returns calibrated lane vehicle counts. It does not publish CCTV-derived speed.
 - Provides a test dashboard with time simulation and a deliberate camera-failure scenario.
 
-The service never presents an uncalibrated camera or an adjacent VD as a driver instruction. A VD observation is shown only as a data-match candidate until the camera's mainline centreline and lane mapping are manually verified.
+The service never presents an uncalibrated camera or an adjacent VD as a driver instruction. A VD observation is shown only as a data-match candidate until the camera's mainline centreline and lane mapping are manually verified. The ten official VD observations are refreshed independently of the two live image subscriptions.
+
+## Free-service operating mode
+
+The pilot is intentionally demand-driven: opening the pilot, choosing a camera, or starting a tour activates the selected camera plus the next camera for 90 seconds. The observer closes unused subscriptions automatically. This prevents a free service from holding ten continuous upstream streams and running ten concurrent image analyses when the driver can only view one camera.
+
+`POST /v1/corridors/n3-south-xindian-yangmei/active-cameras` accepts `cameraId`, an optional `prewarmCameraId`, and an optional `holdMs`. It is called by the pilot automatically. `GET` on the same path reports the active subscriptions.
 
 ## Local QA
 

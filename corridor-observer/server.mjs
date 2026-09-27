@@ -19,6 +19,7 @@ const analysisBase = String(process.env.ANALYSIS_BASE || "http://127.0.0.1:10001
 const analysisPollMs = Math.max(5000, Number(process.env.ANALYSIS_POLL_MS || 10000));
 const mjpegReconnectMs = Math.max(1000, Number(process.env.MJPEG_RECONNECT_MS || 2500));
 const mjpegMaxBufferBytes = Math.max(512 * 1024, Number(process.env.MJPEG_MAX_BUFFER_BYTES || 4 * 1024 * 1024));
+const activeCameraHoldMs = Math.max(30 * 1000, Number(process.env.ACTIVE_CAMERA_HOLD_MS || 90 * 1000));
 const staleAfterMs = Math.max(6000, Number(process.env.SNAPSHOT_STALE_MS || 9000));
 const requestTimeoutMs = Math.max(3000, Number(process.env.REQUEST_TIMEOUT_MS || 8000));
 const pilotHtml = join(dirname(fileURLToPath(import.meta.url)), "pilot.html");
@@ -35,6 +36,7 @@ let collecting = false;
 let lanesUpdatedAt = 0;
 let analysisUpdatedAt = 0;
 const mjpegCollectors = new Map();
+const activeCameraLeases = new Map();
 const tripSessions = createTripSessionStore({ filePath: process.env.TRIP_SESSION_FILE || defaultTripSessionFile });
 
 function sendJson(response, status, payload) {
@@ -110,9 +112,14 @@ function consumeJpegs(buffer, camera) {
 }
 
 async function runMjpegCollector(camera) {
+  const collector = mjpegCollectors.get(camera.id);
+  if (!collector?.active) return;
+  const controller = new AbortController();
+  collector.controller = controller;
   try {
     const response = await fetch(`${relayBase}/mjpeg/${encodeURIComponent(camera.id)}`, {
       headers: { Accept: "multipart/x-mixed-replace,image/jpeg,*/*" },
+      signal: controller.signal,
     });
     if (!response.ok || !response.body) throw new Error(`mjpeg_upstream_${response.status}`);
     const reader = response.body.getReader();
@@ -128,18 +135,55 @@ async function runMjpegCollector(camera) {
     }
     throw new Error("mjpeg_stream_ended");
   } catch (error) {
-    recordFailure(state, camera.id, error);
+    if (!controller.signal.aborted) recordFailure(state, camera.id, error);
   } finally {
     const current = mjpegCollectors.get(camera.id);
-    if (current?.active) current.timer = setTimeout(() => void runMjpegCollector(camera), mjpegReconnectMs);
+    if (current === collector) {
+      current.controller = null;
+      if (current.active) current.timer = setTimeout(() => void runMjpegCollector(camera), mjpegReconnectMs);
+    }
   }
 }
 
-function startMjpegCollectors() {
+function activeCameraIds(now = Date.now()) {
+  for (const [cameraId, expiresAt] of activeCameraLeases) {
+    if (expiresAt <= now) activeCameraLeases.delete(cameraId);
+  }
+  return new Set(activeCameraLeases.keys());
+}
+
+function activateCameraWindow(cameraIds, holdMs = activeCameraHoldMs, now = Date.now()) {
+  const knownIds = new Set(CORRIDOR_CAMERAS.map((camera) => camera.id));
+  const expiresAt = now + Math.max(30 * 1000, Math.min(10 * 60 * 1000, Number(holdMs) || activeCameraHoldMs));
+  const activated = [];
+  for (const cameraId of cameraIds) {
+    if (!knownIds.has(cameraId)) continue;
+    activeCameraLeases.set(cameraId, expiresAt);
+    activated.push(cameraId);
+  }
+  reconcileMjpegCollectors();
+  return activated;
+}
+
+function stopMjpegCollector(cameraId) {
+  const collector = mjpegCollectors.get(cameraId);
+  if (!collector) return;
+  collector.active = false;
+  if (collector.timer) clearTimeout(collector.timer);
+  collector.controller?.abort();
+  mjpegCollectors.delete(cameraId);
+}
+
+function reconcileMjpegCollectors() {
+  const wanted = activeCameraIds();
   for (const camera of CORRIDOR_CAMERAS) {
-    if (mjpegCollectors.has(camera.id)) continue;
-    mjpegCollectors.set(camera.id, { active: true, timer: null });
-    void runMjpegCollector(camera);
+    if (wanted.has(camera.id) && !mjpegCollectors.has(camera.id)) {
+      mjpegCollectors.set(camera.id, { active: true, timer: null, controller: null });
+      void runMjpegCollector(camera);
+    }
+  }
+  for (const cameraId of mjpegCollectors.keys()) {
+    if (!wanted.has(cameraId)) stopMjpegCollector(cameraId);
   }
 }
 
@@ -199,9 +243,12 @@ async function runCollector() {
   try {
     const now = Date.now();
     const calibrations = readCalibrations();
+    reconcileMjpegCollectors();
+    const activeIds = activeCameraIds(now);
+    const activeCameras = CORRIDOR_CAMERAS.filter((camera) => activeIds.has(camera.id));
     // A persistent relay subscription provides new frames between polls. Only
-    // fall back to a one-shot snapshot when the shared stream is not ready.
-    await Promise.all(CORRIDOR_CAMERAS
+    // fall back to a one-shot snapshot when the requested stream is not ready.
+    await Promise.all(activeCameras
       .filter((camera) => !state.cameras.get(camera.id)?.latestAt || now - state.cameras.get(camera.id).latestAt > staleAfterMs)
       .map(collectSnapshot));
     if (now - lanesUpdatedAt >= lanePollMs) {
@@ -210,7 +257,7 @@ async function runCollector() {
     }
     if (now - analysisUpdatedAt >= analysisPollMs) {
       analysisUpdatedAt = now;
-      for (const camera of state.cameras.values()) await collectAnalysis(camera, calibrations);
+      for (const camera of activeCameras) await collectAnalysis(state.cameras.get(camera.id), calibrations);
     }
     state.pollCycles += 1;
   } finally {
@@ -226,7 +273,35 @@ const server = createServer((request, response) => {
     return sendJson(response, 200, { ok: status.ok, corridorId: CORRIDOR_ID, collecting, ...status });
   }
   if (url.pathname === basePath) {
-    return sendJson(response, 200, { ok: true, corridorId: CORRIDOR_ID, label: CORRIDOR_LABEL, relayBase, analysisBase, ...corridorStatus(state, staleAfterMs) });
+    return sendJson(response, 200, {
+      ok: true,
+      corridorId: CORRIDOR_ID,
+      label: CORRIDOR_LABEL,
+      relayBase,
+      analysisBase,
+      activeCameraIds: [...activeCameraIds()],
+      activeCameraLimit: 2,
+      ...corridorStatus(state, staleAfterMs),
+    });
+  }
+  if (url.pathname === `${basePath}/active-cameras` && request.method === "GET") {
+    return sendJson(response, 200, {
+      ok: true,
+      activeCameraIds: [...activeCameraIds()],
+      activeCameraLimit: 2,
+      holdMs: activeCameraHoldMs,
+    });
+  }
+  if (url.pathname === `${basePath}/active-cameras` && request.method === "POST") {
+    return void readJsonBody(request)
+      .then((payload) => {
+        const requested = [payload?.cameraId, payload?.prewarmCameraId].filter(Boolean);
+        const activated = activateCameraWindow(requested, payload?.holdMs);
+        return activated.length
+          ? sendJson(response, 200, { ok: true, activeCameraIds: [...activeCameraIds()], activeCameraLimit: 2, holdMs: activeCameraHoldMs })
+          : sendJson(response, 400, { ok: false, error: "camera_not_found" });
+      })
+      .catch((error) => sendJson(response, 400, { ok: false, error: String(error?.message || error) }));
   }
   if (url.pathname === `${basePath}/output`) {
     const status = corridorStatus(state, staleAfterMs);
@@ -309,7 +384,6 @@ const server = createServer((request, response) => {
   return sendJson(response, 404, { ok: false, error: "not_found" });
 });
 
-startMjpegCollectors();
 runCollector().catch(() => {});
 setInterval(() => void runCollector(), snapshotPollMs).unref();
 server.listen(port, () => console.log(`Corridor Observer listening on :${port}`));

@@ -11,7 +11,9 @@ test("pilot provides manual lane-count and centreline calibration controls", () 
   assert.match(pilotSource, /lane-centreline/);
   assert.match(pilotSource, /id="vdLaneMapping"/);
   assert.match(pilotSource, /function renderVdLaneMapping\(camera, calibration\)/);
-  assert.match(pilotSource, /十支鏡頭共用串流已連線/);
+  assert.match(pilotSource, /目前鏡頭與下一支已啟動即時收集/);
+  assert.match(pilotSource, /active-cameras/);
+  assert.match(pilotSource, /function activateCurrentCameraWindow\(\)/);
   assert.match(pilotSource, /function captureCalibrationPoint\(event\)/);
   assert.match(pilotSource, /function calibrationContentBox\(\)/);
   assert.match(pilotSource, /function positionCalibrationOverlay\(\)/);
