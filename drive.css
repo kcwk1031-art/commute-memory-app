@@ -439,6 +439,11 @@ button { cursor: pointer; }
   box-shadow: inset 0 3px 0 var(--teal);
   background: #f2faf6;
 }
+.lane-card[data-state="recorded"] {
+  border-color: #d6b877;
+  box-shadow: inset 0 3px 0 #d6b877;
+  background: #fffaf0;
+}
 .lane-card-heading {
   display: flex;
   align-items: center;
@@ -453,6 +458,13 @@ button { cursor: pointer; }
 }
 .lane-card > strong { font-size: 23px; line-height: 1; }
 .lane-card > strong small { margin-left: 3px; color: var(--muted); font-size: 10px; font-weight: 750; }
+.lane-card-heading .lane-card-marker {
+  margin-left: auto;
+  color: var(--teal-dark);
+  font-size: 10px;
+  font-weight: 800;
+}
+.lane-card[data-state="recorded"] .lane-card-marker { color: #88611d; }
 
 .observation {
   display: grid;

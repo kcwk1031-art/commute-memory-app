@@ -17,6 +17,22 @@ test("keeps delayed official lane records visible without presenting them as liv
   assert.equal(guidance.freshness.state, "delayed");
   assert.equal(guidance.freshness.canDisplay, true);
   assert.equal(guidance.freshness.canRecommend, false);
-  assert.match(guidance.title, /最後紀錄最快/);
-  assert.equal(guidance.lanes.find((lane) => lane.displayNumber === 1)?.isRecommended, true);
+  assert.match(guidance.title, /速度參考/);
+  assert.equal(guidance.lanes.find((lane) => lane.displayNumber === 1)?.isRecommended, false);
+  assert.equal(guidance.lanes.find((lane) => lane.displayNumber === 1)?.isFastestRecord, true);
+});
+
+test("does not show a green lane recommendation when a same-direction VD is too far from the camera", () => {
+  const guidance = buildLaneGuidance({
+    vd: { dataCollectTime: new Date().toISOString(), distanceKm: 2.2 },
+    screenLaneMapping: { state: "confirmed" },
+    screenLanes: [
+      { laneId: "0", displayNumber: 1, laneType: 1, speedKph: 58 },
+      { laneId: "1", displayNumber: 2, laneType: 1, speedKph: 72 },
+    ],
+    screenFlowReference: { state: "reference", bestLaneId: "1", bestDisplayNumber: 2 },
+  });
+  assert.equal(guidance.locality.state, "remote");
+  assert.equal(guidance.lanes.some((lane) => lane.isRecommended), false);
+  assert.equal(guidance.lanes.find((lane) => lane.displayNumber === 2)?.isFastestRecord, true);
 });

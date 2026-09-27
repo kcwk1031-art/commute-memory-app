@@ -13,6 +13,7 @@ import {
 } from "./drive-direction.js";
 import { resolveDestinationIntent } from "./drive-destination.js";
 import { buildLaneGuidance } from "./drive-guidance.js";
+import { shouldAdvancePilotCamera } from "./drive-pilot-camera.js";
 import { STARTER_CCTV } from "./drive-starter-catalog.js";
 import { appendTestEvent, clearTestEvents, readTestEvents, setTestLoggingEnabled, summariseTestEvents, testLoggingEnabled } from "./drive-test-log.js";
 
@@ -21,8 +22,8 @@ const CAMERA_CATALOG_REFRESH_MS = 15 * 60 * 1000;
 const PERSISTED_CAMERA_CATALOG_MAX_AGE_MS = 14 * 24 * 60 * 60 * 1000;
 const ROAD_REFRESH_MS = 15 * 1000;
 // Recheck the active camera frequently; Relay coalesces simultaneous callers.
-const LANE_REFRESH_MS = 20 * 1000;
-const OBSERVER_REFRESH_MS = 20 * 1000;
+const LANE_REFRESH_MS = 15 * 1000;
+const OBSERVER_REFRESH_MS = 15 * 1000;
 const MAX_CAMERA_DISTANCE_METERS = 5000;
 const CAMERA_SWITCH_METERS = 500;
 const DESTINATION_CANDIDATE_MAX_DISTANCE_METERS = 15000;
@@ -489,6 +490,7 @@ function renderLaneObservation(observation) {
       const card = document.createElement("article");
       card.className = "lane-card";
       if (lane.isRecommended) card.dataset.state = "reference";
+      if (lane.isFastestRecord) card.dataset.state = "recorded";
       const occupancy = Number.isFinite(Number(lane.occupancy)) ? `占有率 ${Math.round(lane.occupancy)}%` : "占有率待確認";
       const volume = Number.isFinite(Number(lane.volume)) ? `流量 ${Math.round(lane.volume)} 輛/分` : "流量待確認";
       const heading = document.createElement("div");
@@ -496,6 +498,12 @@ function renderLaneObservation(observation) {
       const title = document.createElement("span");
       title.textContent = `第 ${lane.displayNumber} 車道`;
       heading.append(title);
+      if (lane.isRecommended || lane.isFastestRecord) {
+        const marker = document.createElement("small");
+        marker.className = "lane-card-marker";
+        marker.textContent = lane.isRecommended ? "較順" : "最高記錄";
+        heading.append(marker);
+      }
       const speed = document.createElement("strong");
       speed.append(String(Math.round(lane.speedKph)));
       const unit = document.createElement("small");
@@ -578,6 +586,11 @@ function prefetchLaneObservation(camera) {
     })
     .catch(() => {})
     .finally(() => state.prefetchLaneRequests.delete(camera.id));
+}
+
+function prefetchNextRoadData(camera) {
+  const next = findNextMainlineCamera(camera);
+  if (next) prefetchLaneObservation(next);
 }
 
 function prepareDestinationCandidate(point) {
@@ -868,7 +881,7 @@ function selectNearbyReferenceCamera(point) {
   };
 }
 
-function selectCalibratedTestCamera(point) {
+function selectCalibratedTestCamera(point, course) {
   if (!CALIBRATED_TEST_MODE) return null;
   const testCameras = state.cctvs
     .filter(isEligibleTestCamera)
@@ -876,13 +889,23 @@ function selectCalibratedTestCamera(point) {
     .map((camera) => ({ ...camera, distance: distanceBetween(point, camera) }))
     .filter((camera) => camera.distance <= DESTINATION_CANDIDATE_MAX_DISTANCE_METERS);
   const current = testCameras.find((camera) => camera.id === state.currentCamera?.id);
-  if (current && current.distance > CAMERA_SWITCH_METERS) return current;
+  if (current) {
+    const next = findNextMainlineCamera(current);
+    const nextDistance = next ? distanceBetween(point, next) : NaN;
+    if (next && shouldAdvancePilotCamera({
+      currentDistanceMeters: current.distance,
+      nextDistanceMeters: nextDistance,
+      courseHeading: course?.heading,
+      bearingToCurrent: bearingBetween(point, current),
+      switchMeters: CAMERA_SWITCH_METERS,
+    })) {
+      return { ...next, distance: nextDistance };
+    }
+    return current;
+  }
 
-  // In the pilot, all calibrated cameras are N3 southbound. Advance at the
-  // same 500 m threshold used by normal forward-camera selection, even if a
-  // phone has not yet supplied a reliable heading.
-  const next = current ? findNextMainlineCamera(current) : null;
-  if (next) return { ...next, distance: distanceBetween(point, next) };
+  // At startup, choose the nearest calibrated mainline camera. Afterwards the
+  // pass-aware rule above prevents an old camera being locked behind the car.
   return testCameras.sort((left, right) => left.distance - right.distance)[0] || null;
 }
 
@@ -913,6 +936,7 @@ function activateCalibratedTestCamera(camera, roadToken) {
     setLaneReference("正在讀取測試鏡頭官方 VD", "測試模式僅使用已完成畫面車道對位的十支鏡頭。", "waiting");
     el.laneDataAge.textContent = "讀取中";
   }
+  prefetchNextRoadData(camera);
   if (changed || !state.imageLoadedAt) {
     try {
       loadCameraStream(camera);
@@ -922,6 +946,7 @@ function activateCalibratedTestCamera(camera, roadToken) {
     }
   }
   void refreshLaneObservation(camera, roadToken);
+  void refreshVisualFlow(camera, roadToken);
 }
 
 function kilometersFromCamera(camera) {
@@ -1334,7 +1359,7 @@ async function refreshRoadInformation(point) {
     setLaneReference("正在確認同向偵測器", "定位已更新；正在比對前方鏡頭與官方 VD。", "waiting");
   }
   if (CALIBRATED_TEST_MODE) {
-    const testCamera = selectCalibratedTestCamera(point);
+    const testCamera = selectCalibratedTestCamera(point, course);
     if (testCamera) {
       activateCalibratedTestCamera(testCamera, roadToken);
       return;

@@ -1,5 +1,9 @@
 // Do not present a multi-minute-old detector average as an immediate driving cue.
 export const LANE_RECOMMEND_MAX_AGE_MS = 2 * 60 * 1000;
+// A VD is a point detector. Beyond this distance it can still describe the
+// corridor, but is too remote to be styled as a recommendation for the CCTV
+// scene directly in front of the driver.
+export const LANE_RECOMMEND_MAX_DISTANCE_KM = 1;
 // TDX can lag its published detector record by several minutes. Keep the
 // last official reading visible with its age, but never present it as a live
 // lane-change reference once it passes the stricter recommendation threshold.
@@ -23,6 +27,17 @@ function vdDistanceLabel(distanceKm) {
   const value = Number(distanceKm);
   if (!Number.isFinite(value) || value < 0) return "同向主線 VD";
   return value < 1 ? `VD 距鏡頭 ${Math.round(value * 1000)} m` : `VD 距鏡頭 ${value.toFixed(1)} km`;
+}
+
+function laneLocality(distanceKm) {
+  const value = Number(distanceKm);
+  if (!Number.isFinite(value) || value < 0) {
+    return { state: "unknown", canRecommend: false, label: "VD 距離待確認" };
+  }
+  if (value <= LANE_RECOMMEND_MAX_DISTANCE_KM) {
+    return { state: "local", canRecommend: true, label: vdDistanceLabel(value) };
+  }
+  return { state: "remote", canRecommend: false, label: vdDistanceLabel(value) };
 }
 
 export function getLaneDataFreshness(dataCollectTime, now = Date.now()) {
@@ -56,6 +71,7 @@ export function buildLaneGuidance(observation, now = Date.now()) {
       .map((lane, index) => ({ ...lane, displayNumber: Number(lane.displayNumber) || index + 1 }))
     : [];
   const freshness = getLaneDataFreshness(observation?.vd?.dataCollectTime, now);
+  const locality = laneLocality(observation?.vd?.distanceKm);
   const mainLaneCount = lanes.length || Number(observation?.mainLaneCount) || 0;
   const vdLabel = vdDistanceLabel(observation?.vd?.distanceKm);
   const reference = hasConfirmedScreenMapping ? observation?.screenFlowReference || {} : observation?.flowReference || {};
@@ -72,19 +88,24 @@ export function buildLaneGuidance(observation, now = Date.now()) {
     };
   }
 
-  if (!freshness.canRecommend) {
+  const canRecommend = freshness.canRecommend && locality.canRecommend;
+  if (!canRecommend) {
     const delayedLanes = bestLane
-      ? lanes.map((lane) => ({ ...lane, isRecommended: lane.laneId === bestLane.laneId }))
+      ? lanes.map((lane) => ({ ...lane, isRecommended: false, isFastestRecord: lane.laneId === bestLane.laneId }))
       : lanes;
+    const reason = !freshness.canRecommend
+      ? `最後更新 ${freshness.label}`
+      : `${vdLabel}，距鏡頭超過 ${LANE_RECOMMEND_MAX_DISTANCE_KM} km`;
     return {
       freshness,
+      locality,
       lanes: delayedLanes,
       title: bestLane
-        ? `主線 ${mainLaneCount} 線｜第 ${bestLane.displayNumber} 車道最後紀錄最快`
-        : `主線 ${mainLaneCount} 線｜資料延遲 ${freshness.label}`,
+        ? `主線 ${mainLaneCount} 線｜第 ${bestLane.displayNumber} 車道速度參考`
+        : `主線 ${mainLaneCount} 線｜資料僅供道路參考`,
       detail: bestLane
-        ? `${vdLabel}｜最後更新 ${freshness.label}。${reference.detail || `第 ${bestLane.displayNumber} 車道為最後官方紀錄中速度最高。`} 資料延遲，請以現場路況為準。`
-        : `${vdLabel}｜最後更新 ${freshness.label}。顯示最後速度，尚無可辨識的最快車道。`,
+        ? `${reason}。${reference.detail || `第 ${bestLane.displayNumber} 車道為目前記錄最高。`} 不顯示綠色推薦，請以現場路況為準。`
+        : `${reason}。顯示可用速度，但尚無可用的車道推薦。`,
       level: "warning",
     };
   }
@@ -92,6 +113,7 @@ export function buildLaneGuidance(observation, now = Date.now()) {
   if (reference.state === "reference" && bestLane) {
     return {
       freshness,
+      locality,
       lanes: lanes.map((lane) => ({ ...lane, isRecommended: lane.laneId === bestLane.laneId })),
       title: `主線 ${mainLaneCount} 線｜第 ${bestLane.displayNumber} 車道車流較順`,
       detail: `${vdLabel}｜${freshness.label}。${reference.detail || `第 ${bestLane.displayNumber} 車道流況相對較順。`}`,
@@ -102,6 +124,7 @@ export function buildLaneGuidance(observation, now = Date.now()) {
   if (reference.state === "similar") {
     return {
       freshness,
+      locality,
       lanes,
       title: `主線 ${mainLaneCount} 線｜各車道差異不明顯`,
       detail: `${vdLabel}｜${freshness.label}。未有明顯差異，維持目前車道較合適。`,
@@ -110,7 +133,8 @@ export function buildLaneGuidance(observation, now = Date.now()) {
   }
 
   return {
-      freshness,
+    freshness,
+    locality,
       lanes,
       title: `主線 ${mainLaneCount} 線｜不提供車道推薦`,
       detail: `${vdLabel}｜${freshness.label}。官方資料不足以比較各車道，僅顯示目前可用速度。`,
